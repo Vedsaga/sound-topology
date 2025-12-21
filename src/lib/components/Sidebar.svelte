@@ -1,8 +1,31 @@
 <script lang="ts">
-    import { Atom, Waves, Settings, HelpCircle } from "@lucide/svelte";
+    import {
+        Atom,
+        Waves,
+        Settings,
+        HelpCircle,
+        PanelLeftClose,
+        PanelLeft,
+    } from "@lucide/svelte";
 
     // Props
-    let { currentView = "phase-space" }: { currentView?: string } = $props();
+    let {
+        currentView = "phase-space",
+        collapsed = false,
+        onCollapseChange,
+    }: {
+        currentView?: string;
+        collapsed?: boolean;
+        onCollapseChange?: (collapsed: boolean) => void;
+    } = $props();
+
+    // Local collapse state if no external control
+    let isCollapsed = $state(collapsed);
+
+    function toggleCollapse() {
+        isCollapsed = !isCollapsed;
+        onCollapseChange?.(isCollapsed);
+    }
 
     const navItems = [
         { id: "phase-space", label: "Phase Space", icon: Atom },
@@ -10,64 +33,121 @@
     ];
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:collapsed={isCollapsed}>
+    <!-- Logo / Brand -->
     <div class="logo">
-        <Atom size={28} strokeWidth={1.5} />
-        <span class="logo-text">Sound Topology</span>
+        <Atom size={24} strokeWidth={1.5} />
+        {#if !isCollapsed}
+            <span class="logo-text">Sound Topology</span>
+        {/if}
     </div>
 
+    <!-- Collapse toggle -->
+    <button
+        class="collapse-btn"
+        onclick={toggleCollapse}
+        title={isCollapsed ? "Expand" : "Collapse"}
+    >
+        {#if isCollapsed}
+            <PanelLeft size={18} />
+        {:else}
+            <PanelLeftClose size={18} />
+        {/if}
+    </button>
+
+    <!-- Navigation -->
     <nav class="nav">
         {#each navItems as item}
             <button
                 class="sidebar-item"
                 class:active={currentView === item.id}
                 disabled={item.disabled}
+                title={isCollapsed ? item.label : undefined}
             >
                 <svelte:component this={item.icon} size={20} />
-                <span>{item.label}</span>
-                {#if item.disabled}
-                    <span class="coming-soon">Soon</span>
+                {#if !isCollapsed}
+                    <span>{item.label}</span>
+                    {#if item.disabled}
+                        <span class="coming-soon">Soon</span>
+                    {/if}
                 {/if}
             </button>
         {/each}
     </nav>
 
+    <!-- Footer -->
     <div class="sidebar-footer">
-        <button class="sidebar-item">
+        <button
+            class="sidebar-item"
+            title={isCollapsed ? "Settings" : undefined}
+        >
             <Settings size={20} />
-            <span>Settings</span>
+            {#if !isCollapsed}<span>Settings</span>{/if}
         </button>
-        <button class="sidebar-item">
+        <button class="sidebar-item" title={isCollapsed ? "Help" : undefined}>
             <HelpCircle size={20} />
-            <span>Help</span>
+            {#if !isCollapsed}<span>Help</span>{/if}
         </button>
     </div>
 </aside>
 
 <style>
     .sidebar {
-        width: 220px;
+        width: 200px;
         height: 100vh;
         display: flex;
         flex-direction: column;
         background: var(--color-card);
         border-right: 1px solid var(--color-border);
-        padding: 1rem;
+        padding: 0.75rem;
+        transition: width 0.2s ease;
+        flex-shrink: 0;
+    }
+
+    .sidebar.collapsed {
+        width: 56px;
     }
 
     .logo {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        padding: 0.5rem 0.75rem;
-        margin-bottom: 1.5rem;
+        gap: 0.625rem;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
         color: var(--color-foreground);
+        min-height: 40px;
     }
 
     .logo-text {
-        font-size: 1rem;
+        font-size: 0.875rem;
         font-weight: 600;
         letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+
+    .collapse-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 0.5rem;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-muted-foreground);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        margin-bottom: 0.5rem;
+    }
+
+    .collapse-btn:hover {
+        background: var(--color-muted);
+        color: var(--color-foreground);
+    }
+
+    .sidebar.collapsed .collapse-btn {
+        justify-content: center;
     }
 
     .nav {
@@ -75,23 +155,30 @@
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
+        overflow-y: auto;
     }
 
     .sidebar-item {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.625rem;
         width: 100%;
-        padding: 0.625rem 0.75rem;
+        padding: 0.5rem;
         border: none;
         border-radius: var(--radius-md);
         background: transparent;
         color: var(--color-muted-foreground);
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         font-weight: 500;
         cursor: pointer;
-        transition: all var(--transition-fast);
+        transition: all 0.15s ease;
         text-align: left;
+        white-space: nowrap;
+    }
+
+    .sidebar.collapsed .sidebar-item {
+        justify-content: center;
+        padding: 0.625rem;
     }
 
     .sidebar-item:hover:not(:disabled) {
@@ -111,10 +198,10 @@
 
     .coming-soon {
         margin-left: auto;
-        font-size: 0.625rem;
+        font-size: 0.5625rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        padding: 0.125rem 0.375rem;
+        padding: 0.125rem 0.25rem;
         background: var(--color-muted);
         border-radius: var(--radius-full);
         color: var(--color-muted-foreground);
@@ -124,8 +211,8 @@
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
-        padding-top: 1rem;
+        padding-top: 0.75rem;
         border-top: 1px solid var(--color-border);
-        margin-top: 1rem;
+        margin-top: 0.5rem;
     }
 </style>

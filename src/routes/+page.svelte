@@ -2,9 +2,10 @@
   import { browser } from "$app/environment";
   import { Canvas } from "@threlte/core";
   import Sidebar from "$lib/components/Sidebar.svelte";
-  import AudioLibrary from "$lib/components/AudioLibrary.svelte";
+  import FileSelectionBar from "$lib/components/FileSelectionBar.svelte";
   import ControlPanel from "$lib/components/ControlPanel.svelte";
   import PhaseSpaceScene from "$lib/components/PhaseSpaceScene.svelte";
+  import { Maximize2, Grid3x3, GitCompare } from "@lucide/svelte";
   import type { PhaseSpacePoint } from "$lib/phaseSpaceEmbedding";
   import type { AudioFileEntry, AnalysisConfig } from "$lib/audioLibraryTypes";
   import {
@@ -14,27 +15,38 @@
   } from "$lib/audioLibraryTypes";
 
   // ═══════════════════════════════════════════
-  // STABLE STATE (avoid $derived chains)
+  // VIEW MODE
   // ═══════════════════════════════════════════
+  type ViewMode = "single" | "grid" | "compare";
+  let viewMode = $state<ViewMode>("single");
 
-  // File storage (use Map for O(1) lookup without array recreation)
+  // ═══════════════════════════════════════════
+  // FILE STATE
+  // ═══════════════════════════════════════════
   let fileMap = $state(new Map<string, AudioFileEntry>());
-  let fileOrder = $state<string[]>([]); // Just IDs for ordering
-  let activeFileId = $state<string | null>(null);
-  let libraryViewMode = $state<"list" | "grid">("list");
+  let fileOrder = $state<string[]>([]);
 
-  // Display-only state (doesn't trigger computation)
+  let primaryFileId = $state<string | null>(null);
+  let secondaryFileId = $state<string | null>(null);
+
   let showPath = $state(true);
 
-  // Current visualization state (only updates when switching files or computation completes)
-  let currentPoints = $state<PhaseSpacePoint[]>([]);
-  let currentComputedTau = $state(12);
-  let currentConfig = $state<AnalysisConfig>(getDefaultConfig());
-  let currentDuration = $state(0);
+  // Primary display state
+  let primaryPoints = $state<PhaseSpacePoint[]>([]);
+  let primaryConfig = $state<AnalysisConfig>(getDefaultConfig());
+  let primaryComputedTau = $state(12);
+  let primaryDuration = $state(0);
 
-  // Derive files array only when needed for display
+  // Secondary display state
+  let secondaryPoints = $state<PhaseSpacePoint[]>([]);
+  let secondaryConfig = $state<AnalysisConfig>(getDefaultConfig());
+  let secondaryComputedTau = $state(12);
+  let secondaryDuration = $state(0);
+
   let audioFiles = $derived(
-    fileOrder.map((id) => fileMap.get(id)!).filter(Boolean),
+    fileOrder
+      .map((id) => fileMap.get(id))
+      .filter((f): f is AudioFileEntry => f !== undefined),
   );
 
   // ═══════════════════════════════════════════
@@ -42,6 +54,7 @@
   // ═══════════════════════════════════════════
   let worker: Worker | null = null;
   let pendingFileId: string | null = null;
+  let pendingSlot: "primary" | "secondary" = "primary";
 
   $effect(() => {
     if (browser && !worker) {
@@ -54,25 +67,26 @@
         if (e.data.type === "result" && pendingFileId) {
           const file = fileMap.get(pendingFileId);
           if (file) {
-            // Update file in map (mutate directly, Map is mutable)
             file.points = e.data.points;
             file.computedTau = e.data.computedTau;
             file.isProcessing = false;
 
-            // If this is the active file, update display state
-            if (pendingFileId === activeFileId) {
-              currentPoints = e.data.points;
-              currentComputedTau = e.data.computedTau;
+            if (pendingSlot === "primary" && pendingFileId === primaryFileId) {
+              primaryPoints = e.data.points;
+              primaryComputedTau = e.data.computedTau;
+            } else if (
+              pendingSlot === "secondary" &&
+              pendingFileId === secondaryFileId
+            ) {
+              secondaryPoints = e.data.points;
+              secondaryComputedTau = e.data.computedTau;
             }
           }
           pendingFileId = null;
         }
       };
     }
-
-    return () => {
-      worker?.terminate();
-    };
+    return () => worker?.terminate();
   });
 
   // ═══════════════════════════════════════════
@@ -99,27 +113,47 @@
 
     fileOrder = [...fileOrder, ...newIds];
 
-    // Auto-select first if none selected
-    if (!activeFileId && newIds.length > 0) {
-      selectFile(newIds[0]);
+    if (!primaryFileId && newIds.length > 0) {
+      selectFile(newIds[0], "primary");
     }
   }
 
-  function selectFile(id: string) {
+  function selectFile(id: string, slot: "primary" | "secondary") {
     const file = fileMap.get(id);
     if (!file) return;
 
-    activeFileId = id;
+    // Toggle: if clicking same file, unselect it
+    if (slot === "primary" && primaryFileId === id) {
+      primaryFileId = null;
+      primaryPoints = [];
+      return;
+    }
+    if (slot === "secondary" && secondaryFileId === id) {
+      secondaryFileId = null;
+      secondaryPoints = [];
+      return;
+    }
 
-    // Update display state from file
-    currentPoints = file.points;
-    currentComputedTau = file.computedTau;
-    currentConfig = { ...file.config };
-    currentDuration = file.buffer.duration;
+    if (slot === "primary") {
+      primaryFileId = id;
+      primaryPoints = file.points;
+      primaryConfig = { ...file.config };
+      primaryComputedTau = file.computedTau;
+      primaryDuration = file.buffer.duration;
 
-    // Trigger computation if needed
-    if (file.points.length === 0 || file.isProcessing) {
-      triggerComputation(file);
+      if (file.points.length === 0) {
+        triggerComputation(file, "primary");
+      }
+    } else {
+      secondaryFileId = id;
+      secondaryPoints = file.points;
+      secondaryConfig = { ...file.config };
+      secondaryComputedTau = file.computedTau;
+      secondaryDuration = file.buffer.duration;
+
+      if (file.points.length === 0) {
+        triggerComputation(file, "secondary");
+      }
     }
   }
 
@@ -127,13 +161,14 @@
     fileMap.delete(id);
     fileOrder = fileOrder.filter((fid) => fid !== id);
 
-    if (activeFileId === id) {
-      if (fileOrder.length > 0) {
-        selectFile(fileOrder[0]);
-      } else {
-        activeFileId = null;
-        currentPoints = [];
-      }
+    if (primaryFileId === id) {
+      primaryFileId = fileOrder.length > 0 ? fileOrder[0] : null;
+      if (primaryFileId) selectFile(primaryFileId, "primary");
+      else primaryPoints = [];
+    }
+    if (secondaryFileId === id) {
+      secondaryFileId = null;
+      secondaryPoints = [];
     }
   }
 
@@ -142,12 +177,16 @@
   // ═══════════════════════════════════════════
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function triggerComputation(file: AudioFileEntry) {
+  function triggerComputation(
+    file: AudioFileEntry,
+    slot: "primary" | "secondary",
+  ) {
     if (!worker) return;
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       pendingFileId = file.id;
+      pendingSlot = slot;
       file.isProcessing = true;
 
       worker!.postMessage({
@@ -169,104 +208,283 @@
   // CONFIG UPDATES
   // ═══════════════════════════════════════════
   function updateConfig<K extends keyof AnalysisConfig>(
+    slot: "primary" | "secondary",
     key: K,
     value: AnalysisConfig[K],
   ) {
-    if (!activeFileId) return;
-    const file = fileMap.get(activeFileId);
+    const fileId = slot === "primary" ? primaryFileId : secondaryFileId;
+    if (!fileId) return;
+    const file = fileMap.get(fileId);
     if (!file) return;
 
-    // Update file config
-    file.config[key] = value;
+    file.config = { ...file.config, [key]: value };
 
-    // Update display state
-    currentConfig = { ...file.config };
+    if (slot === "primary") {
+      primaryConfig = { ...file.config };
+    } else {
+      secondaryConfig = { ...file.config };
+    }
 
-    // Trigger recomputation
-    triggerComputation(file);
+    triggerComputation(file, slot);
   }
+
+  const viewModes: { mode: ViewMode; icon: typeof Maximize2; label: string }[] =
+    [
+      { mode: "single", icon: Maximize2, label: "Single" },
+      { mode: "grid", icon: Grid3x3, label: "Grid" },
+      { mode: "compare", icon: GitCompare, label: "Compare" },
+    ];
 </script>
 
 <svelte:head>
   <title>Sound Topology - Phase Space Explorer</title>
-  <meta
-    name="description"
-    content="Explore the topological structure of sound using Takens' Embedding Theorem"
-  />
 </svelte:head>
 
 <div class="app-layout">
   <Sidebar currentView="phase-space" />
 
   <main class="main-content">
-    <header class="header">
-      <div class="header-left">
-        <h1 class="page-title">Phase Space Explorer</h1>
-        <p class="page-subtitle">Visualize the attractor geometry of sound</p>
-      </div>
-    </header>
+    <!-- Workspace (no header, more canvas space) -->
+    <div class="workspace">
+      {#if viewMode === "single"}
+        <!-- SINGLE VIEW -->
+        <div class="single-layout">
+          <div class="canvas-area">
+            {#if browser}
+              <Canvas>
+                <PhaseSpaceScene
+                  points={primaryPoints}
+                  {showPath}
+                  xrayMode={primaryConfig.xrayMode}
+                  opacity={primaryConfig.opacity}
+                />
+              </Canvas>
+            {/if}
+            {#if primaryPoints.length === 0}
+              <div class="canvas-placeholder">
+                <p>Select a file to visualize</p>
+              </div>
+            {/if}
+          </div>
 
-    <div class="content-grid">
-      <!-- 3D Canvas -->
-      <div class="canvas-section">
-        <div class="canvas-container bg-noise">
-          {#if browser}
-            <Canvas>
-              <PhaseSpaceScene
-                points={currentPoints}
+          {#if primaryFileId}
+            <aside class="control-sidebar">
+              <ControlPanel
+                tau={primaryConfig.tau}
+                computedTau={primaryComputedTau}
+                smoothing={primaryConfig.smoothing}
+                normalize={primaryConfig.normalize}
                 {showPath}
-                xrayMode={currentConfig.xrayMode}
-                opacity={currentConfig.opacity}
+                preprocess={primaryConfig.preprocess}
+                autoTau={primaryConfig.autoTau}
+                pcaAlign={primaryConfig.pcaAlign}
+                xrayMode={primaryConfig.xrayMode}
+                opacity={primaryConfig.opacity}
+                onTauChange={(v) => updateConfig("primary", "tau", v)}
+                onSmoothingChange={(v) =>
+                  updateConfig("primary", "smoothing", v)}
+                onNormalizeChange={(v) =>
+                  updateConfig("primary", "normalize", v)}
+                onShowPathChange={(v) => (showPath = v)}
+                onPreprocessChange={(v) =>
+                  updateConfig("primary", "preprocess", v)}
+                onAutoTauChange={(v) => updateConfig("primary", "autoTau", v)}
+                onPcaAlignChange={(v) => updateConfig("primary", "pcaAlign", v)}
+                onXrayModeChange={(v) => updateConfig("primary", "xrayMode", v)}
+                onOpacityChange={(v) => updateConfig("primary", "opacity", v)}
+                pointCount={primaryPoints.length}
+                duration={primaryDuration}
               />
-            </Canvas>
-          {/if}
-
-          {#if currentPoints.length === 0}
-            <div class="canvas-overlay">
-              <p>Drop audio files to visualize their phase space</p>
-            </div>
+            </aside>
           {/if}
         </div>
+      {:else if viewMode === "grid"}
+        <!-- GRID VIEW - Thumbnail gallery -->
+        <div class="grid-layout">
+          <div class="grid-area">
+            {#if audioFiles.length === 0}
+              <p class="empty-message">Drop audio files to see thumbnails</p>
+            {:else}
+              <div class="thumbnail-grid">
+                {#each audioFiles as file (file.id)}
+                  <div
+                    class="thumbnail-card"
+                    class:active={file.id === primaryFileId}
+                    onclick={() => {
+                      viewMode = "single";
+                      selectFile(file.id, "primary");
+                    }}
+                    onkeydown={(e) =>
+                      e.key === "Enter" && selectFile(file.id, "primary")}
+                    role="button"
+                    tabindex="0"
+                  >
+                    <div class="thumbnail-preview">
+                      {#if browser && file.points.length > 0}
+                        <Canvas>
+                          <PhaseSpaceScene
+                            points={file.points}
+                            showPath={true}
+                            xrayMode={true}
+                            opacity={0.15}
+                          />
+                        </Canvas>
+                      {:else}
+                        <div class="thumbnail-loading">...</div>
+                      {/if}
+                    </div>
+                    <div class="thumbnail-label">
+                      <span class="thumbnail-letter"
+                        >{file.metadata.letter}</span
+                      >
+                      <span class="thumbnail-name">{file.metadata.rawName}</span
+                      >
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          <aside class="filter-sidebar">
+            <p class="sidebar-title">Filters</p>
+            <p class="coming-soon">Filter panel coming soon</p>
+          </aside>
+        </div>
+      {:else if viewMode === "compare"}
+        <!-- COMPARE VIEW with control panels -->
+        <div class="compare-layout">
+          <!-- Panel A -->
+          <div class="compare-panel">
+            <div class="panel-header">File A</div>
+            <div class="canvas-area">
+              {#if browser}
+                <Canvas>
+                  <PhaseSpaceScene
+                    points={primaryPoints}
+                    {showPath}
+                    xrayMode={primaryConfig.xrayMode}
+                    opacity={primaryConfig.opacity}
+                  />
+                </Canvas>
+              {/if}
+              {#if !primaryFileId}
+                <div class="canvas-placeholder"><p>Click a file for A</p></div>
+              {/if}
+            </div>
+            {#if primaryFileId}
+              <div class="compare-controls">
+                <ControlPanel
+                  tau={primaryConfig.tau}
+                  computedTau={primaryComputedTau}
+                  smoothing={primaryConfig.smoothing}
+                  normalize={primaryConfig.normalize}
+                  {showPath}
+                  preprocess={primaryConfig.preprocess}
+                  autoTau={primaryConfig.autoTau}
+                  pcaAlign={primaryConfig.pcaAlign}
+                  xrayMode={primaryConfig.xrayMode}
+                  opacity={primaryConfig.opacity}
+                  onTauChange={(v) => updateConfig("primary", "tau", v)}
+                  onSmoothingChange={(v) =>
+                    updateConfig("primary", "smoothing", v)}
+                  onNormalizeChange={(v) =>
+                    updateConfig("primary", "normalize", v)}
+                  onShowPathChange={(v) => (showPath = v)}
+                  onPreprocessChange={(v) =>
+                    updateConfig("primary", "preprocess", v)}
+                  onAutoTauChange={(v) => updateConfig("primary", "autoTau", v)}
+                  onPcaAlignChange={(v) =>
+                    updateConfig("primary", "pcaAlign", v)}
+                  onXrayModeChange={(v) =>
+                    updateConfig("primary", "xrayMode", v)}
+                  onOpacityChange={(v) => updateConfig("primary", "opacity", v)}
+                  pointCount={primaryPoints.length}
+                  duration={primaryDuration}
+                />
+              </div>
+            {/if}
+          </div>
+
+          <!-- Panel B -->
+          <div class="compare-panel">
+            <div class="panel-header">File B</div>
+            <div class="canvas-area">
+              {#if browser && secondaryFileId}
+                <Canvas>
+                  <PhaseSpaceScene
+                    points={secondaryPoints}
+                    {showPath}
+                    xrayMode={secondaryConfig.xrayMode}
+                    opacity={secondaryConfig.opacity}
+                  />
+                </Canvas>
+              {:else}
+                <div class="canvas-placeholder"><p>Click a file for B</p></div>
+              {/if}
+            </div>
+            {#if secondaryFileId}
+              <div class="compare-controls">
+                <ControlPanel
+                  tau={secondaryConfig.tau}
+                  computedTau={secondaryComputedTau}
+                  smoothing={secondaryConfig.smoothing}
+                  normalize={secondaryConfig.normalize}
+                  {showPath}
+                  preprocess={secondaryConfig.preprocess}
+                  autoTau={secondaryConfig.autoTau}
+                  pcaAlign={secondaryConfig.pcaAlign}
+                  xrayMode={secondaryConfig.xrayMode}
+                  opacity={secondaryConfig.opacity}
+                  onTauChange={(v) => updateConfig("secondary", "tau", v)}
+                  onSmoothingChange={(v) =>
+                    updateConfig("secondary", "smoothing", v)}
+                  onNormalizeChange={(v) =>
+                    updateConfig("secondary", "normalize", v)}
+                  onShowPathChange={(v) => (showPath = v)}
+                  onPreprocessChange={(v) =>
+                    updateConfig("secondary", "preprocess", v)}
+                  onAutoTauChange={(v) =>
+                    updateConfig("secondary", "autoTau", v)}
+                  onPcaAlignChange={(v) =>
+                    updateConfig("secondary", "pcaAlign", v)}
+                  onXrayModeChange={(v) =>
+                    updateConfig("secondary", "xrayMode", v)}
+                  onOpacityChange={(v) =>
+                    updateConfig("secondary", "opacity", v)}
+                  pointCount={secondaryPoints.length}
+                  duration={secondaryDuration}
+                />
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Bottom bar: files + mode toggle -->
+    <div class="bottom-bar">
+      <FileSelectionBar
+        files={audioFiles}
+        activeFileId={primaryFileId}
+        compareFileId={secondaryFileId}
+        isCompareMode={viewMode === "compare"}
+        onFileSelect={selectFile}
+        onFileRemove={handleFileRemove}
+        onFilesAdded={handleFilesAdded}
+      />
+
+      <div class="view-toggle">
+        {#each viewModes as { mode, icon: Icon, label }}
+          <button
+            class="mode-btn"
+            class:active={viewMode === mode}
+            onclick={() => (viewMode = mode)}
+            title={label}
+          >
+            <Icon size={16} />
+          </button>
+        {/each}
       </div>
-
-      <!-- Right Panel -->
-      <aside class="right-panel">
-        <AudioLibrary
-          files={audioFiles}
-          {activeFileId}
-          viewMode={libraryViewMode}
-          onFilesAdded={handleFilesAdded}
-          onFileSelect={selectFile}
-          onFileRemove={handleFileRemove}
-          onViewModeChange={(mode) => (libraryViewMode = mode)}
-        />
-
-        {#if activeFileId}
-          <ControlPanel
-            tau={currentConfig.tau}
-            computedTau={currentComputedTau}
-            smoothing={currentConfig.smoothing}
-            normalize={currentConfig.normalize}
-            {showPath}
-            preprocess={currentConfig.preprocess}
-            autoTau={currentConfig.autoTau}
-            pcaAlign={currentConfig.pcaAlign}
-            xrayMode={currentConfig.xrayMode}
-            opacity={currentConfig.opacity}
-            onTauChange={(v) => updateConfig("tau", v)}
-            onSmoothingChange={(v) => updateConfig("smoothing", v)}
-            onNormalizeChange={(v) => updateConfig("normalize", v)}
-            onShowPathChange={(v) => (showPath = v)}
-            onPreprocessChange={(v) => updateConfig("preprocess", v)}
-            onAutoTauChange={(v) => updateConfig("autoTau", v)}
-            onPcaAlignChange={(v) => updateConfig("pcaAlign", v)}
-            onXrayModeChange={(v) => updateConfig("xrayMode", v)}
-            onOpacityChange={(v) => updateConfig("opacity", v)}
-            pointCount={currentPoints.length}
-            duration={currentDuration}
-          />
-        {/if}
-      </aside>
     </div>
   </main>
 </div>
@@ -282,91 +500,235 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 1.5rem 2rem;
+    padding: 0.75rem;
+    gap: 0.75rem;
     max-height: 100vh;
     overflow: hidden;
   }
 
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 1.5rem;
-  }
-
-  .header-left {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .page-title {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0;
-    color: var(--color-foreground);
-  }
-
-  .page-subtitle {
-    font-size: 0.875rem;
-    color: var(--color-muted-foreground);
-    margin: 0;
-  }
-
-  .content-grid {
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 1.5rem;
+  .workspace {
     flex: 1;
     min-height: 0;
   }
 
-  .canvas-section {
-    position: relative;
-    min-height: 400px;
+  /* Bottom bar with files + mode toggle */
+  .bottom-bar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
   }
 
-  .canvas-container {
-    position: absolute;
-    inset: 0;
+  .bottom-bar :global(.file-bar) {
+    flex: 1;
+  }
+
+  .view-toggle {
+    display: flex;
+    gap: 0.125rem;
+    padding: 0.25rem;
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    align-self: center;
+  }
+
+  .mode-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .mode-btn:hover {
+    color: var(--color-foreground);
+  }
+  .mode-btn.active {
+    background: var(--color-brand);
+    color: white;
+  }
+
+  /* Single View */
+  .single-layout {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 0.75rem;
+    height: 100%;
+  }
+
+  .canvas-area {
+    position: relative;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    border: 1px solid var(--color-border);
   }
 
-  .canvas-overlay {
+  .canvas-placeholder {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: none;
-  }
-
-  .canvas-overlay p {
     color: var(--color-muted-foreground);
-    font-size: 0.875rem;
-    background: color-mix(in srgb, var(--color-background) 80%, transparent);
-    padding: 0.75rem 1.25rem;
-    border-radius: var(--radius-md);
-    backdrop-filter: blur(4px);
   }
 
-  .right-panel {
+  .control-sidebar {
+    overflow-y: auto;
+  }
+
+  /* Grid View */
+  .grid-layout {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    gap: 0.75rem;
+    height: 100%;
+  }
+
+  .grid-area {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow-y: auto;
+    padding: 0.75rem;
+  }
+
+  .thumbnail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .thumbnail-card {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    overflow: hidden;
+  }
+
+  .thumbnail-card:hover {
+    border-color: var(--color-muted-foreground);
+  }
+
+  .thumbnail-card.active {
+    border-color: var(--color-brand);
+  }
+
+  .thumbnail-preview {
+    height: 100px;
+    position: relative;
+  }
+
+  .thumbnail-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-muted-foreground);
+  }
+
+  .thumbnail-label {
+    padding: 0.5rem;
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .thumbnail-letter {
+    font-weight: 600;
+    color: var(--color-brand);
+  }
+
+  .thumbnail-name {
+    font-size: 0.6875rem;
+    color: var(--color-muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .empty-message {
+    color: var(--color-muted-foreground);
+    text-align: center;
+    padding: 2rem;
+  }
+
+  .filter-sidebar {
+    padding: 0.75rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  .sidebar-title {
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: var(--color-muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.75rem;
+  }
+
+  .coming-soon {
+    color: var(--color-muted-foreground);
+    font-size: 0.8125rem;
+  }
+
+  /* Compare View */
+  .compare-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    height: 100%;
+  }
+
+  .compare-panel {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.5rem;
+    min-height: 0;
+  }
+
+  .panel-header {
+    font-weight: 600;
+    font-size: 0.75rem;
+    padding: 0.375rem 0.625rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-muted-foreground);
+  }
+
+  .compare-panel .canvas-area {
+    flex: 1;
+    min-height: 200px;
+  }
+
+  .compare-controls {
+    max-height: 180px;
     overflow-y: auto;
-    max-height: 100%;
   }
 
   @media (max-width: 900px) {
-    .content-grid {
+    .single-layout,
+    .grid-layout {
       grid-template-columns: 1fr;
     }
-
-    .canvas-section {
-      min-height: 300px;
+    .compare-layout {
+      grid-template-columns: 1fr;
     }
   }
 </style>
