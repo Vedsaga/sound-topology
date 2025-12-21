@@ -19,8 +19,13 @@
         onCollapseChange?: (collapsed: boolean) => void;
     } = $props();
 
-    // Local collapse state if no external control
-    let isCollapsed = $state(collapsed);
+    // Local collapse state - synced from prop
+    let isCollapsed = $state(false);
+
+    // Sync from prop when it changes
+    $effect(() => {
+        isCollapsed = collapsed;
+    });
 
     function toggleCollapse() {
         isCollapsed = !isCollapsed;
@@ -58,13 +63,14 @@
     <!-- Navigation -->
     <nav class="nav">
         {#each navItems as item}
+            {@const Icon = item.icon}
             <button
                 class="sidebar-item"
                 class:active={currentView === item.id}
                 disabled={item.disabled}
                 title={isCollapsed ? item.label : undefined}
             >
-                <svelte:component this={item.icon} size={20} />
+                <Icon size={20} />
                 {#if !isCollapsed}
                     <span>{item.label}</span>
                     {#if item.disabled}

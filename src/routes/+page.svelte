@@ -43,10 +43,42 @@
   let secondaryComputedTau = $state(12);
   let secondaryDuration = $state(0);
 
+  // Derived file names for display
+  let primaryFileName = $derived(
+    primaryFileId
+      ? (fileMap.get(primaryFileId)?.metadata.rawName ?? "File A")
+      : "Select file",
+  );
+  let secondaryFileName = $derived(
+    secondaryFileId
+      ? (fileMap.get(secondaryFileId)?.metadata.rawName ?? "File B")
+      : "Select file",
+  );
+
+  // Filter state
+  let filterLetter = $state<string | null>(null);
+  let filterGender = $state<"all" | "male" | "female">("all");
+
+  // All audio files
   let audioFiles = $derived(
     fileOrder
       .map((id) => fileMap.get(id))
       .filter((f): f is AudioFileEntry => f !== undefined),
+  );
+
+  // Available filter options
+  let availableLetters = $derived(
+    [...new Set(audioFiles.map((f) => f.metadata.letter))].sort(),
+  );
+
+  // Filtered files for grid view
+  let filteredFiles = $derived(
+    audioFiles.filter((f) => {
+      if (filterLetter && f.metadata.letter !== filterLetter) return false;
+      if (filterGender !== "all" && f.metadata.gender !== filterGender)
+        return false;
+      return true;
+    }),
   );
 
   // ═══════════════════════════════════════════
@@ -306,7 +338,7 @@
               <p class="empty-message">Drop audio files to see thumbnails</p>
             {:else}
               <div class="thumbnail-grid">
-                {#each audioFiles as file (file.id)}
+                {#each filteredFiles as file (file.id)}
                   <div
                     class="thumbnail-card"
                     class:active={file.id === primaryFileId}
@@ -347,7 +379,62 @@
           </div>
           <aside class="filter-sidebar">
             <p class="sidebar-title">Filters</p>
-            <p class="coming-soon">Filter panel coming soon</p>
+
+            <!-- Letter filter -->
+            <div class="filter-group">
+              <span class="filter-label">Letter</span>
+              <div class="filter-chips">
+                <button
+                  class="filter-chip"
+                  class:active={filterLetter === null}
+                  onclick={() => (filterLetter = null)}
+                >
+                  All
+                </button>
+                {#each availableLetters as letter}
+                  <button
+                    class="filter-chip"
+                    class:active={filterLetter === letter}
+                    onclick={() => (filterLetter = letter)}
+                  >
+                    {letter}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Gender filter -->
+            <div class="filter-group">
+              <span class="filter-label">Gender</span>
+              <div class="filter-chips">
+                <button
+                  class="filter-chip"
+                  class:active={filterGender === "all"}
+                  onclick={() => (filterGender = "all")}
+                >
+                  All
+                </button>
+                <button
+                  class="filter-chip"
+                  class:active={filterGender === "female"}
+                  onclick={() => (filterGender = "female")}
+                >
+                  Female
+                </button>
+                <button
+                  class="filter-chip"
+                  class:active={filterGender === "male"}
+                  onclick={() => (filterGender = "male")}
+                >
+                  Male
+                </button>
+              </div>
+            </div>
+
+            <!-- Count display -->
+            <p class="filter-count">
+              {filteredFiles.length} / {audioFiles.length} files
+            </p>
           </aside>
         </div>
       {:else if viewMode === "compare"}
@@ -355,7 +442,7 @@
         <div class="compare-layout">
           <!-- Panel A -->
           <div class="compare-panel">
-            <div class="panel-header">File A</div>
+            <div class="panel-header">A: {primaryFileName}</div>
             <div class="canvas-area">
               {#if browser}
                 <Canvas>
@@ -407,7 +494,7 @@
 
           <!-- Panel B -->
           <div class="compare-panel">
-            <div class="panel-header">File B</div>
+            <div class="panel-header">B: {secondaryFileName}</div>
             <div class="canvas-area">
               {#if browser && secondaryFileId}
                 <Canvas>
@@ -601,8 +688,26 @@
 
   .thumbnail-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+  }
+
+  @media (max-width: 1400px) {
+    .thumbnail-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .thumbnail-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 700px) {
+    .thumbnail-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   .thumbnail-card {
@@ -612,6 +717,7 @@
     cursor: pointer;
     transition: all 0.15s ease;
     overflow: hidden;
+    aspect-ratio: 1;
   }
 
   .thumbnail-card:hover {
@@ -623,7 +729,7 @@
   }
 
   .thumbnail-preview {
-    height: 100px;
+    height: calc(100% - 40px);
     position: relative;
   }
 
@@ -679,9 +785,52 @@
     margin: 0 0 0.75rem;
   }
 
-  .coming-soon {
+  .filter-group {
+    margin-bottom: 1rem;
+  }
+
+  .filter-label {
+    display: block;
+    font-size: 0.6875rem;
+    font-weight: 500;
     color: var(--color-muted-foreground);
-    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.375rem;
+  }
+
+  .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .filter-chip {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .filter-chip:hover {
+    border-color: var(--color-foreground);
+    color: var(--color-foreground);
+  }
+
+  .filter-chip.active {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: white;
+  }
+
+  .filter-count {
+    font-size: 0.75rem;
+    color: var(--color-muted-foreground);
+    margin: 0.75rem 0 0;
   }
 
   /* Compare View */
