@@ -2,92 +2,161 @@
     // Props
     let {
         tau = 12,
+        computedTau = 12,
         smoothing = 3,
         normalize = true,
         showPath = true,
+        preprocess = true,
+        autoTau = true,
+        pcaAlign = true,
         onTauChange,
         onSmoothingChange,
         onNormalizeChange,
         onShowPathChange,
+        onPreprocessChange,
+        onAutoTauChange,
+        onPcaAlignChange,
         pointCount = 0,
         duration = 0,
     }: {
         tau: number;
+        computedTau: number;
         smoothing: number;
         normalize: boolean;
         showPath: boolean;
+        preprocess: boolean;
+        autoTau: boolean;
+        pcaAlign: boolean;
         onTauChange: (value: number) => void;
         onSmoothingChange: (value: number) => void;
         onNormalizeChange: (value: boolean) => void;
         onShowPathChange: (value: boolean) => void;
+        onPreprocessChange: (value: boolean) => void;
+        onAutoTauChange: (value: boolean) => void;
+        onPcaAlignChange: (value: boolean) => void;
         pointCount?: number;
         duration?: number;
     } = $props();
 </script>
 
 <div class="control-panel glass">
-    <h3 class="panel-title">Embedding Parameters</h3>
+    <!-- Preprocessing Section -->
+    <div class="section">
+        <h3 class="panel-title">Signal Processing</h3>
 
-    <div class="control-group">
-        <div class="control-header">
-            <label for="tau-slider">τ (Delay)</label>
-            <span class="control-value">{tau}</span>
-        </div>
-        <input
-            id="tau-slider"
-            type="range"
-            class="slider"
-            min="1"
-            max="50"
-            step="1"
-            value={tau}
-            oninput={(e) =>
-                onTauChange(parseInt((e.target as HTMLInputElement).value))}
-        />
-        <p class="control-hint">Time delay in samples</p>
-    </div>
-
-    <div class="control-group">
-        <div class="control-header">
-            <label for="smoothing-slider">Smoothing</label>
-            <span class="control-value">{smoothing}</span>
-        </div>
-        <input
-            id="smoothing-slider"
-            type="range"
-            class="slider"
-            min="0"
-            max="20"
-            step="1"
-            value={smoothing}
-            oninput={(e) =>
-                onSmoothingChange(
-                    parseInt((e.target as HTMLInputElement).value),
-                )}
-        />
-        <p class="control-hint">Laplacian iterations</p>
-    </div>
-
-    <div class="control-row">
         <label class="checkbox-label">
             <input
                 type="checkbox"
-                checked={normalize}
+                checked={preprocess}
                 onchange={(e) =>
-                    onNormalizeChange((e.target as HTMLInputElement).checked)}
+                    onPreprocessChange((e.target as HTMLInputElement).checked)}
             />
-            <span>Normalize</span>
+            <span>Band-pass Filter</span>
+            <span class="hint-inline">(60Hz-4kHz)</span>
         </label>
 
         <label class="checkbox-label">
             <input
                 type="checkbox"
-                checked={showPath}
+                checked={pcaAlign}
                 onchange={(e) =>
-                    onShowPathChange((e.target as HTMLInputElement).checked)}
+                    onPcaAlignChange((e.target as HTMLInputElement).checked)}
             />
-            <span>Show Path</span>
+            <span>PCA Align</span>
+            <span class="hint-inline">(standard view)</span>
         </label>
+    </div>
+
+    <!-- Embedding Section -->
+    <div class="section">
+        <h3 class="panel-title">Embedding</h3>
+
+        <label class="checkbox-label">
+            <input
+                type="checkbox"
+                checked={autoTau}
+                onchange={(e) =>
+                    onAutoTauChange((e.target as HTMLInputElement).checked)}
+            />
+            <span>Auto τ</span>
+            {#if autoTau}
+                <span class="computed-value">= {computedTau}</span>
+            {/if}
+        </label>
+
+        {#if !autoTau}
+            <div class="control-group">
+                <div class="control-header">
+                    <label for="tau-slider">τ (Delay)</label>
+                    <span class="control-value">{tau}</span>
+                </div>
+                <input
+                    id="tau-slider"
+                    type="range"
+                    class="slider"
+                    min="1"
+                    max="50"
+                    step="1"
+                    value={tau}
+                    oninput={(e) =>
+                        onTauChange(
+                            parseInt((e.target as HTMLInputElement).value),
+                        )}
+                />
+            </div>
+        {/if}
+
+        <div class="control-group">
+            <div class="control-header">
+                <label for="smoothing-slider">Smoothing</label>
+                <span class="control-value">{smoothing}</span>
+            </div>
+            <input
+                id="smoothing-slider"
+                type="range"
+                class="slider"
+                min="0"
+                max="20"
+                step="1"
+                value={smoothing}
+                oninput={(e) =>
+                    onSmoothingChange(
+                        parseInt((e.target as HTMLInputElement).value),
+                    )}
+            />
+            <p class="control-hint">Laplacian iterations</p>
+        </div>
+    </div>
+
+    <!-- Display Section -->
+    <div class="section">
+        <h3 class="panel-title">Display</h3>
+
+        <div class="control-row">
+            <label class="checkbox-label">
+                <input
+                    type="checkbox"
+                    checked={normalize}
+                    onchange={(e) =>
+                        onNormalizeChange(
+                            (e.target as HTMLInputElement).checked,
+                        )}
+                />
+                <span>Normalize</span>
+            </label>
+
+            <label class="checkbox-label">
+                <input
+                    type="checkbox"
+                    checked={showPath}
+                    onchange={(e) =>
+                        onShowPathChange(
+                            (e.target as HTMLInputElement).checked,
+                        )}
+                />
+                <span>Show Path</span>
+            </label>
+        </div>
     </div>
 
     {#if pointCount > 0}
@@ -110,16 +179,29 @@
         border-radius: var(--radius-lg);
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: 0.75rem;
+    }
+
+    .section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .section:last-of-type {
+        border-bottom: none;
+        padding-bottom: 0;
     }
 
     .panel-title {
-        font-size: 0.8125rem;
+        font-size: 0.6875rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
         color: var(--color-muted-foreground);
-        margin: 0 0 0.25rem;
+        margin: 0;
     }
 
     .control-group {
@@ -174,12 +256,25 @@
         cursor: pointer;
     }
 
+    .hint-inline {
+        font-size: 0.75rem;
+        color: var(--color-muted-foreground);
+        margin-left: auto;
+    }
+
+    .computed-value {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-accent-amber);
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
+    }
+
     .stats {
         display: flex;
         gap: 1.5rem;
         padding-top: 0.75rem;
         border-top: 1px solid var(--color-border);
-        margin-top: 0.5rem;
     }
 
     .stat {

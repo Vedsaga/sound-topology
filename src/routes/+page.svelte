@@ -12,12 +12,18 @@
   let audioBuffer = $state<AudioBuffer | null>(null);
   let points = $state<PhaseSpacePoint[]>([]);
   let isComputing = $state(false);
+  let computedTau = $state(12);
 
-  // Parameters (UI values)
+  // Embedding parameters
   let tau = $state(12);
-  let smoothing = $state(3);
+  let smoothing = $state(5);
   let normalize = $state(true);
   let showPath = $state(true);
+
+  // NEW: Preprocessing options (enabled by default for clean visualization)
+  let preprocess = $state(true);
+  let autoTau = $state(true);
+  let pcaAlign = $state(true);
 
   // Web Worker for off-thread computation
   let worker: Worker | null = null;
@@ -33,6 +39,7 @@
       worker.onmessage = (e) => {
         if (e.data.type === "result") {
           points = e.data.points;
+          computedTau = e.data.computedTau;
           isComputing = false;
         }
       };
@@ -43,10 +50,13 @@
     };
   });
 
-  // Debounced parameters (for computation)
+  // Debounced parameters
   let debouncedTau = $state(12);
-  let debouncedSmoothing = $state(3);
+  let debouncedSmoothing = $state(5);
   let debouncedNormalize = $state(true);
+  let debouncedPreprocess = $state(true);
+  let debouncedAutoTau = $state(true);
+  let debouncedPcaAlign = $state(true);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Debounce ALL parameter changes (100ms delay)
@@ -54,12 +64,18 @@
     const currentTau = tau;
     const currentSmoothing = smoothing;
     const currentNormalize = normalize;
+    const currentPreprocess = preprocess;
+    const currentAutoTau = autoTau;
+    const currentPcaAlign = pcaAlign;
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debouncedTau = currentTau;
       debouncedSmoothing = currentSmoothing;
       debouncedNormalize = currentNormalize;
+      debouncedPreprocess = currentPreprocess;
+      debouncedAutoTau = currentAutoTau;
+      debouncedPcaAlign = currentPcaAlign;
     }, 100);
 
     return () => {
@@ -74,23 +90,22 @@
       return;
     }
 
-    // Use debounced values
-    const currentTau = debouncedTau;
-    const currentSmoothing = debouncedSmoothing;
-    const shouldNormalize = debouncedNormalize;
-
     isComputing = true;
 
-    // Get samples and send to worker
+    // Get samples and send to worker with ALL options
     const samples = audioBuffer.getChannelData(0);
 
     worker.postMessage({
       type: "compute",
       samples: samples,
-      tau: currentTau,
-      smoothing: currentSmoothing,
-      normalize: shouldNormalize,
-      maxPoints: 6000, // Reduced for smoother rendering
+      sampleRate: audioBuffer.sampleRate,
+      tau: debouncedTau,
+      autoTau: debouncedAutoTau,
+      smoothing: debouncedSmoothing,
+      normalize: debouncedNormalize,
+      preprocess: debouncedPreprocess,
+      pcaAlign: debouncedPcaAlign,
+      maxPoints: 5000,
     });
   });
 
@@ -144,13 +159,20 @@
         {#if audioBuffer}
           <ControlPanel
             {tau}
+            {computedTau}
             {smoothing}
             {normalize}
             {showPath}
+            {preprocess}
+            {autoTau}
+            {pcaAlign}
             onTauChange={(v) => (tau = v)}
             onSmoothingChange={(v) => (smoothing = v)}
             onNormalizeChange={(v) => (normalize = v)}
             onShowPathChange={(v) => (showPath = v)}
+            onPreprocessChange={(v) => (preprocess = v)}
+            onAutoTauChange={(v) => (autoTau = v)}
+            onPcaAlignChange={(v) => (pcaAlign = v)}
             pointCount={points.length}
             duration={audioBuffer.duration}
           />
