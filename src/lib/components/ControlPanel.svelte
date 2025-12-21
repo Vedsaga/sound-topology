@@ -9,6 +9,8 @@
         preprocess = true,
         autoTau = true,
         pcaAlign = true,
+        xrayMode = true,
+        opacity = 0.15,
         onTauChange,
         onSmoothingChange,
         onNormalizeChange,
@@ -16,6 +18,8 @@
         onPreprocessChange,
         onAutoTauChange,
         onPcaAlignChange,
+        onXrayModeChange,
+        onOpacityChange,
         pointCount = 0,
         duration = 0,
     }: {
@@ -27,6 +31,8 @@
         preprocess: boolean;
         autoTau: boolean;
         pcaAlign: boolean;
+        xrayMode: boolean;
+        opacity: number;
         onTauChange: (value: number) => void;
         onSmoothingChange: (value: number) => void;
         onNormalizeChange: (value: boolean) => void;
@@ -34,6 +40,8 @@
         onPreprocessChange: (value: boolean) => void;
         onAutoTauChange: (value: boolean) => void;
         onPcaAlignChange: (value: boolean) => void;
+        onXrayModeChange: (value: boolean) => void;
+        onOpacityChange: (value: number) => void;
         pointCount?: number;
         duration?: number;
     } = $props();
@@ -131,6 +139,39 @@
     <!-- Display Section -->
     <div class="section">
         <h3 class="panel-title">Display</h3>
+
+        <label class="checkbox-label">
+            <input
+                type="checkbox"
+                checked={xrayMode}
+                onchange={(e) =>
+                    onXrayModeChange((e.target as HTMLInputElement).checked)}
+            />
+            <span>X-ray Mode</span>
+            <span class="hint-inline">(reveal density)</span>
+        </label>
+
+        {#if xrayMode}
+            <div class="control-group">
+                <div class="control-header">
+                    <label for="opacity-slider">Opacity</label>
+                    <span class="control-value">{opacity.toFixed(2)}</span>
+                </div>
+                <input
+                    id="opacity-slider"
+                    type="range"
+                    class="slider"
+                    min="0.02"
+                    max="0.5"
+                    step="0.01"
+                    value={opacity}
+                    oninput={(e) =>
+                        onOpacityChange(
+                            parseFloat((e.target as HTMLInputElement).value),
+                        )}
+                />
+            </div>
+        {/if}
 
         <div class="control-row">
             <label class="checkbox-label">

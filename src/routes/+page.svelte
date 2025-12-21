@@ -25,6 +25,10 @@
   let autoTau = $state(true);
   let pcaAlign = $state(true);
 
+  // NEW: X-ray visualization mode
+  let xrayMode = $state(true);
+  let opacity = $state(0.12);
+
   // Web Worker for off-thread computation
   let worker: Worker | null = null;
 
@@ -140,7 +144,7 @@
         <div class="canvas-container bg-noise">
           {#if browser}
             <Canvas>
-              <PhaseSpaceScene {points} {showPath} />
+              <PhaseSpaceScene {points} {showPath} {xrayMode} {opacity} />
             </Canvas>
           {/if}
 
@@ -166,6 +170,8 @@
             {preprocess}
             {autoTau}
             {pcaAlign}
+            {xrayMode}
+            {opacity}
             onTauChange={(v) => (tau = v)}
             onSmoothingChange={(v) => (smoothing = v)}
             onNormalizeChange={(v) => (normalize = v)}
@@ -173,6 +179,8 @@
             onPreprocessChange={(v) => (preprocess = v)}
             onAutoTauChange={(v) => (autoTau = v)}
             onPcaAlignChange={(v) => (pcaAlign = v)}
+            onXrayModeChange={(v) => (xrayMode = v)}
+            onOpacityChange={(v) => (opacity = v)}
             pointCount={points.length}
             duration={audioBuffer.duration}
           />
