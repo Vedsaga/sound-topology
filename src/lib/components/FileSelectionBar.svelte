@@ -7,6 +7,8 @@
         activeFileId = null,
         compareFileId = null,
         isCompareMode = false,
+        isOverlayMode = false,
+        overlayFileIds = [],
         onFileSelect,
         onFileRemove,
         onFilesAdded,
@@ -15,6 +17,8 @@
         activeFileId: string | null;
         compareFileId: string | null;
         isCompareMode: boolean;
+        isOverlayMode?: boolean;
+        overlayFileIds?: string[];
         onFileSelect: (id: string, slot: "primary" | "secondary") => void;
         onFileRemove: (id: string) => void;
         onFilesAdded: (newFiles: { file: File; buffer: AudioBuffer }[]) => void;
@@ -116,12 +120,20 @@
 
     // Click handler for file selection
     function handleFileClick(id: string) {
-        if (isCompareMode && activeFileId && activeFileId !== id) {
+        if (isOverlayMode) {
+            // In overlay mode, just add to overlay
+            onFileSelect(id, "primary");
+        } else if (isCompareMode && activeFileId && activeFileId !== id) {
             // In compare mode, second click sets secondary
             onFileSelect(id, "secondary");
         } else {
             onFileSelect(id, "primary");
         }
+    }
+
+    // Check if file is in overlay
+    function isInOverlay(id: string): boolean {
+        return overlayFileIds.includes(id);
     }
 </script>
 
@@ -156,6 +168,7 @@
                     class="file-chip"
                     class:active={file.id === activeFileId}
                     class:compare={file.id === compareFileId}
+                    class:in-overlay={isOverlayMode && isInOverlay(file.id)}
                     onclick={() => handleFileClick(file.id)}
                     onkeydown={(e) =>
                         e.key === "Enter" && handleFileClick(file.id)}
@@ -164,7 +177,9 @@
                 >
                     <span class="chip-letter">{file.metadata.letter}</span>
                     <span class="chip-name">{file.metadata.rawName}</span>
-                    {#if file.id === activeFileId}
+                    {#if isOverlayMode && isInOverlay(file.id)}
+                        <span class="chip-badge overlay">✓</span>
+                    {:else if file.id === activeFileId}
                         <span class="chip-badge">A</span>
                     {:else if file.id === compareFileId}
                         <span class="chip-badge secondary">B</span>
@@ -316,6 +331,15 @@
 
     .chip-badge.secondary {
         background: var(--color-accent-amber);
+    }
+
+    .chip-badge.overlay {
+        background: #4caf50;
+    }
+
+    .file-chip.in-overlay {
+        border-color: #4caf50;
+        background: color-mix(in srgb, #4caf50 10%, var(--color-background));
     }
 
     .chip-remove {
