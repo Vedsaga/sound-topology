@@ -55,9 +55,10 @@
       : "Select file",
   );
 
-  // Filter state
-  let filterLetter = $state<string | null>(null);
-  let filterGender = $state<"all" | "male" | "female">("all");
+  // Multi-select filter state
+  let filterLetters = $state<string[]>([]);
+  let filterGenders = $state<("male" | "female" | "golden")[]>([]);
+  let filterSpeakerIds = $state<string[]>([]);
 
   // All audio files
   let audioFiles = $derived(
@@ -70,12 +71,44 @@
   let availableLetters = $derived(
     [...new Set(audioFiles.map((f) => f.metadata.letter))].sort(),
   );
+  let availableSpeakerIds = $derived(
+    [...new Set(audioFiles.map((f) => f.metadata.speakerId))].sort(),
+  );
+  let availableGenders = $derived(() => {
+    const genders: ("male" | "female" | "golden")[] = [];
+    if (audioFiles.some((f) => f.metadata.gender === "male"))
+      genders.push("male");
+    if (audioFiles.some((f) => f.metadata.gender === "female"))
+      genders.push("female");
+    if (audioFiles.some((f) => f.metadata.gender === "golden"))
+      genders.push("golden");
+    return genders;
+  });
+
+  // Helper to toggle multi-select
+  function toggleFilter<T>(arr: T[], val: T): T[] {
+    return arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val];
+  }
 
   // Filtered files for grid view
   let filteredFiles = $derived(
     audioFiles.filter((f) => {
-      if (filterLetter && f.metadata.letter !== filterLetter) return false;
-      if (filterGender !== "all" && f.metadata.gender !== filterGender)
+      if (
+        filterLetters.length > 0 &&
+        !filterLetters.includes(f.metadata.letter)
+      )
+        return false;
+      if (
+        filterGenders.length > 0 &&
+        !filterGenders.includes(
+          f.metadata.gender as "male" | "female" | "golden",
+        )
+      )
+        return false;
+      if (
+        filterSpeakerIds.length > 0 &&
+        !filterSpeakerIds.includes(f.metadata.speakerId)
+      )
         return false;
       return true;
     }),
@@ -378,29 +411,63 @@
             {/if}
           </div>
           <aside class="filter-sidebar">
-            <p class="sidebar-title">Filters</p>
+            <div class="filter-header">
+              <p class="sidebar-title">Filters</p>
+              {#if filterLetters.length > 0 || filterGenders.length > 0 || filterSpeakerIds.length > 0}
+                <button
+                  class="clear-filters-btn"
+                  onclick={() => {
+                    filterLetters = [];
+                    filterGenders = [];
+                    filterSpeakerIds = [];
+                  }}
+                >
+                  Clear all
+                </button>
+              {/if}
+            </div>
+
+            <!-- Speaker filter -->
+            <div class="filter-group">
+              <span class="filter-label">Speaker</span>
+              <div class="filter-chips">
+                {#each availableSpeakerIds as speakerId}
+                  <button
+                    class="filter-chip"
+                    class:active={filterSpeakerIds.includes(speakerId)}
+                    onclick={() =>
+                      (filterSpeakerIds = toggleFilter(
+                        filterSpeakerIds,
+                        speakerId,
+                      ))}
+                  >
+                    {speakerId}
+                  </button>
+                {/each}
+              </div>
+              {#if availableSpeakerIds.length === 0}
+                <p class="filter-empty">No speakers</p>
+              {/if}
+            </div>
 
             <!-- Letter filter -->
             <div class="filter-group">
               <span class="filter-label">Letter</span>
               <div class="filter-chips">
-                <button
-                  class="filter-chip"
-                  class:active={filterLetter === null}
-                  onclick={() => (filterLetter = null)}
-                >
-                  All
-                </button>
                 {#each availableLetters as letter}
                   <button
                     class="filter-chip"
-                    class:active={filterLetter === letter}
-                    onclick={() => (filterLetter = letter)}
+                    class:active={filterLetters.includes(letter)}
+                    onclick={() =>
+                      (filterLetters = toggleFilter(filterLetters, letter))}
                   >
                     {letter}
                   </button>
                 {/each}
               </div>
+              {#if availableLetters.length === 0}
+                <p class="filter-empty">No letters</p>
+              {/if}
             </div>
 
             <!-- Gender filter -->
@@ -409,24 +476,27 @@
               <div class="filter-chips">
                 <button
                   class="filter-chip"
-                  class:active={filterGender === "all"}
-                  onclick={() => (filterGender = "all")}
-                >
-                  All
-                </button>
-                <button
-                  class="filter-chip"
-                  class:active={filterGender === "female"}
-                  onclick={() => (filterGender = "female")}
+                  class:active={filterGenders.includes("female")}
+                  onclick={() =>
+                    (filterGenders = toggleFilter(filterGenders, "female"))}
                 >
                   Female
                 </button>
                 <button
                   class="filter-chip"
-                  class:active={filterGender === "male"}
-                  onclick={() => (filterGender = "male")}
+                  class:active={filterGenders.includes("male")}
+                  onclick={() =>
+                    (filterGenders = toggleFilter(filterGenders, "male"))}
                 >
                   Male
+                </button>
+                <button
+                  class="filter-chip"
+                  class:active={filterGenders.includes("golden")}
+                  onclick={() =>
+                    (filterGenders = toggleFilter(filterGenders, "golden"))}
+                >
+                  Golden
                 </button>
               </div>
             </div>
@@ -774,6 +844,15 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
+    overflow-y: auto;
+    max-height: 100%;
+  }
+
+  .filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
   }
 
   .sidebar-title {
@@ -782,7 +861,27 @@
     color: var(--color-muted-foreground);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin: 0 0 0.75rem;
+    margin: 0;
+  }
+
+  .clear-filters-btn {
+    font-size: 0.6875rem;
+    padding: 0.25rem 0.5rem;
+    border: none;
+    background: transparent;
+    color: var(--color-brand);
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+
+  .clear-filters-btn:hover {
+    opacity: 0.7;
+  }
+
+  .filter-empty {
+    font-size: 0.75rem;
+    color: var(--color-muted-foreground);
+    margin: 0;
   }
 
   .filter-group {

@@ -10,10 +10,11 @@ import type { PhaseSpacePoint } from './phaseSpaceEmbedding';
  */
 export interface FileMetadata {
     letter: string;           // अ, इ, क, etc.
-    gender: 'male' | 'female' | 'unknown';
+    gender: 'male' | 'female' | 'golden' | 'unknown';
     speakerNum: number;       // 1-10+
     clipNum: number;          // 001-999
     rawName: string;          // Original filename
+    speakerId: string;        // e.g., "female-1", "golden"
 }
 
 /**
@@ -52,8 +53,8 @@ export interface AudioFileEntry {
  */
 export interface FilterState {
     letters: string[];        // Empty = all
-    gender: 'all' | 'male' | 'female';
-    speakerNums: number[];    // Empty = all
+    genders: ('male' | 'female' | 'golden')[];  // Empty = all
+    speakerIds: string[];     // Empty = all, e.g., ["female-1", "male-2"]
 }
 
 /**
@@ -64,17 +65,33 @@ export function parseFilename(filename: string): FileMetadata {
     const name = filename.replace(/\.[^/.]+$/, '');
 
     // Pattern: {letter}_{gender}-{speakerNum}_{clipNum}
-    // Example: अ_female-1_013
-    const regex = /^(.+)_(male|female)-(\d+)_(\d+)$/;
-    const match = name.match(regex);
+    // Example: अ_female-1_013 or अ_golden_013
+    const regexWithSpeaker = /^(.+)_(male|female|golden)-(\d+)_(\d+)$/;
+    const regexGolden = /^(.+)_(golden)_(\d+)$/;
 
+    let match = name.match(regexWithSpeaker);
+    if (match) {
+        const gender = match[2] as 'male' | 'female' | 'golden';
+        const speakerNum = parseInt(match[3], 10);
+        return {
+            letter: match[1],
+            gender,
+            speakerNum,
+            clipNum: parseInt(match[4], 10),
+            rawName: filename,
+            speakerId: `${gender}-${speakerNum}`
+        };
+    }
+
+    match = name.match(regexGolden);
     if (match) {
         return {
             letter: match[1],
-            gender: match[2] as 'male' | 'female',
-            speakerNum: parseInt(match[3], 10),
-            clipNum: parseInt(match[4], 10),
-            rawName: filename
+            gender: 'golden',
+            speakerNum: 0,
+            clipNum: parseInt(match[3], 10),
+            rawName: filename,
+            speakerId: 'golden'
         };
     }
 
@@ -84,7 +101,8 @@ export function parseFilename(filename: string): FileMetadata {
         gender: 'unknown',
         speakerNum: 0,
         clipNum: 0,
-        rawName: filename
+        rawName: filename,
+        speakerId: 'unknown'
     };
 }
 
@@ -119,18 +137,18 @@ export function filterFiles(
     filter: FilterState
 ): AudioFileEntry[] {
     return files.filter(f => {
-        // Letter filter
+        // Letter filter (multi-select)
         if (filter.letters.length > 0 && !filter.letters.includes(f.metadata.letter)) {
             return false;
         }
 
-        // Gender filter
-        if (filter.gender !== 'all' && f.metadata.gender !== filter.gender) {
+        // Gender filter (multi-select)
+        if (filter.genders.length > 0 && !filter.genders.includes(f.metadata.gender as 'male' | 'female' | 'golden')) {
             return false;
         }
 
-        // Speaker filter
-        if (filter.speakerNums.length > 0 && !filter.speakerNums.includes(f.metadata.speakerNum)) {
+        // Speaker filter (multi-select by speakerId)
+        if (filter.speakerIds.length > 0 && !filter.speakerIds.includes(f.metadata.speakerId)) {
             return false;
         }
 
@@ -143,21 +161,24 @@ export function filterFiles(
  */
 export function getFilterOptions(files: AudioFileEntry[]) {
     const letters = new Set<string>();
-    const speakerNums = new Set<number>();
+    const speakerIds = new Set<string>();
     let hasMale = false;
     let hasFemale = false;
+    let hasGolden = false;
 
     for (const f of files) {
         letters.add(f.metadata.letter);
-        speakerNums.add(f.metadata.speakerNum);
+        speakerIds.add(f.metadata.speakerId);
         if (f.metadata.gender === 'male') hasMale = true;
         if (f.metadata.gender === 'female') hasFemale = true;
+        if (f.metadata.gender === 'golden') hasGolden = true;
     }
 
     return {
         letters: Array.from(letters).sort(),
-        speakerNums: Array.from(speakerNums).sort((a, b) => a - b),
+        speakerIds: Array.from(speakerIds).sort(),
         hasMale,
-        hasFemale
+        hasFemale,
+        hasGolden
     };
 }
