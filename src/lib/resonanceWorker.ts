@@ -150,8 +150,8 @@ function detectFormants(envelope: Float32Array, sampleRate: number): [number, nu
     const n = envelope.length;
     const freqPerBin = sampleRate / (2 * n);
 
-    // Find local maxima (peaks)
-    const peaks: { freq: number; mag: number }[] = [];
+    // Find local maxima (peaks) with their prominence
+    const peaks: { freq: number; mag: number; prominence: number }[] = [];
 
     // Search in typical formant range: 200Hz - 4000Hz
     const minBin = Math.floor(200 / freqPerBin);
@@ -159,18 +159,21 @@ function detectFormants(envelope: Float32Array, sampleRate: number): [number, nu
 
     for (let i = minBin + 1; i < maxBin - 1; i++) {
         if (envelope[i] > envelope[i - 1] && envelope[i] > envelope[i + 1]) {
-            // Must be significantly above neighbors
-            const avgNeighbor = (envelope[i - 1] + envelope[i + 1]) / 2;
-            if (envelope[i] > avgNeighbor * 1.1) {
-                peaks.push({ freq: i * freqPerBin, mag: envelope[i] });
-            }
+            // Calculate prominence: how much higher than the lower neighbor
+            const minNeighbor = Math.min(envelope[i - 1], envelope[i + 1]);
+            const prominence = envelope[i] - minNeighbor;
+            peaks.push({
+                freq: i * freqPerBin,
+                mag: envelope[i],
+                prominence
+            });
         }
     }
 
-    // Sort by magnitude and take top 3
-    peaks.sort((a, b) => b.mag - a.mag);
+    // Sort by prominence (relative peak height) to get most distinctive peaks
+    peaks.sort((a, b) => b.prominence - a.prominence);
 
-    // Get frequencies, sort by frequency for F1 < F2 < F3
+    // Get top 3 frequencies, then sort by frequency for F1 < F2 < F3
     const topFreqs = peaks.slice(0, 3).map(p => p.freq).sort((a, b) => a - b);
 
     // Ensure we have 3 formants (fill with estimates if missing)
