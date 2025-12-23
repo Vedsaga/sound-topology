@@ -429,7 +429,10 @@
         if (!resonanceWorker) return;
         pendingResonanceFileId = file.id;
         pendingResonanceSlot = slot;
-        pendingResonanceMode = mode as "lissajous" | "cymatics";
+        pendingResonanceMode = mode as
+          | "lissajous"
+          | "cymatics"
+          | "lissajous-manifold";
 
         resonanceWorker.postMessage({
           type: "compute",
@@ -526,6 +529,7 @@
     }
     const file = fileMap.get(fileId);
     const colorIndex = overlayConfigs.length % OVERLAY_COLORS.length;
+    const defaultMode: ProcessingMode = "lissajous-manifold";
     overlayConfigs = [
       ...overlayConfigs,
       {
@@ -534,7 +538,7 @@
         visible: true,
         xrayMode: globalXray,
         opacity: 0.15,
-        processingMode: file?.config.processingMode ?? "lissajous",
+        processingMode: defaultMode,
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         scale: 1,
@@ -544,9 +548,9 @@
     // Auto-select newly added file
     selectedOverlayId = fileId;
 
-    // Ensure file is computed for the default mode
-    if (file && getActivePoints(file).length === 0) {
-      triggerComputation(file, "primary");
+    // Ensure file is computed for the overlay default mode
+    if (file && getPointsForMode(file, defaultMode).length === 0) {
+      triggerOverlayComputation(file, defaultMode);
     }
   }
 
@@ -583,11 +587,52 @@
     // Ensure the file has computed points for this mode
     const file = fileMap.get(fileId);
     if (file && getPointsForMode(file, mode).length === 0) {
-      // Temporarily set file's config to compute for this mode
-      const originalMode = file.config.processingMode;
-      file.config.processingMode = mode;
-      triggerComputation(file, "primary");
-      file.config.processingMode = originalMode; // Restore
+      // Trigger computation for this specific mode without modifying file.config
+      triggerOverlayComputation(file, mode);
+    }
+  }
+
+  // Dedicated computation trigger for overlay (doesn't affect global/single view state)
+  function triggerOverlayComputation(
+    file: AudioFileEntry,
+    mode: ProcessingMode,
+  ) {
+    file.isProcessing = true;
+
+    if (mode === "signal-dynamics") {
+      if (!worker) return;
+      pendingFileId = file.id;
+      pendingSlot = "primary";
+
+      worker.postMessage({
+        type: "compute",
+        samples: file.buffer.getChannelData(0),
+        sampleRate: file.buffer.sampleRate,
+        tau: file.config.tau,
+        autoTau: file.config.autoTau,
+        smoothing: file.config.smoothing,
+        normalize: file.config.normalize,
+        preprocess: file.config.preprocess,
+        pcaAlign: file.config.pcaAlign,
+        maxPoints: 5000,
+      });
+    } else {
+      if (!resonanceWorker) return;
+      pendingResonanceFileId = file.id;
+      pendingResonanceSlot = "primary";
+      pendingResonanceMode = mode as
+        | "lissajous"
+        | "cymatics"
+        | "lissajous-manifold";
+
+      resonanceWorker.postMessage({
+        type: "compute",
+        samples: file.buffer.getChannelData(0),
+        sampleRate: file.buffer.sampleRate,
+        mode: mode,
+        windowMs: file.config.windowMs,
+        maxPoints: 5000,
+      });
     }
   }
 
