@@ -23,8 +23,9 @@ export interface FileMetadata {
  * - lissajous: Averaged formant-ratio 3D curves (spectral geometry)
  * - cymatics: Formant-weighted Chladni patterns (spectral geometry)
  * - lissajous-manifold: Time-stacked formant segments → thickened tube (resonance topology)
+ * - lpc-vowel-space: LPC-based formant extraction with Bark scale (scientific-grade)
  */
-export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics' | 'lissajous-manifold';
+export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics' | 'lissajous-manifold' | 'lpc-vowel-space';
 
 /**
  * Time-extended formant trajectory frame
@@ -33,6 +34,28 @@ export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics' | 'lis
 export interface FormantFrame {
     time: number;              // Time in seconds
     formants: [number, number, number];  // F1, F2, F3 in Hz
+}
+
+/**
+ * LPC-based formant frame with bandwidths and dispersion
+ * Used for lpc-vowel-space mode (scientific-grade extraction)
+ */
+export interface LPCFormantFrame {
+    time: number;
+    f1: number; f2: number; f3: number;  // Hz
+    b1: number; b2: number; b3: number;  // Bandwidth Hz
+    dispersion: number;                   // (F3 - F1) / 2
+}
+
+/**
+ * LPC point with opacity from formant dispersion
+ */
+export interface LPCPoint3D {
+    x: number;  // Bark(F2) - frontness
+    y: number;  // -Bark(F1) - opening
+    z: number;  // (B1+B2)/200 - thickness
+    t: number;  // time [0,1]
+    opacity: number;  // from dispersion
 }
 
 /**
@@ -67,7 +90,9 @@ export interface AudioFileEntry {
     lissajousPoints: PhaseSpacePoint[];       // Averaged formant-ratio curves
     cymaticsPoints: PhaseSpacePoint[];        // Chladni patterns
     lissajousManifoldPoints: PhaseSpacePoint[];  // Time-stacked resonance regions
+    lpcVowelSpacePoints: LPCPoint3D[];        // LPC-based vowel space (scientific)
     formantTrajectory?: FormantFrame[];       // Time-extended formants
+    lpcFormantTrajectory?: LPCFormantFrame[]; // LPC formants with bandwidths
     computedTau: number;
     // Status
     isProcessing: boolean;

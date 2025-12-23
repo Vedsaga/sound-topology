@@ -453,3 +453,6 @@ self.onmessage = (e: MessageEvent<ResWorkerMessage>) => {
     const result = processAudio(samples, sampleRate, mode, windowMs, maxPoints);
     self.postMessage(result);
 };
+
+// Make this file a proper ES module to avoid "duplicate function" errors in TypeScript
+export { };

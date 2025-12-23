@@ -360,3 +360,6 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     };
     self.postMessage(result);
 };
+
+// Make this file a proper ES module to avoid "duplicate function" errors in TypeScript
+export { };

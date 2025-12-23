@@ -62,7 +62,8 @@
     let isSpectralMode = $derived(
         processingMode === "lissajous" ||
             processingMode === "cymatics" ||
-            processingMode === "lissajous-manifold",
+            processingMode === "lissajous-manifold" ||
+            processingMode === "lpc-vowel-space",
     );
 
     let advancedOpen = $state(false);
@@ -101,6 +102,14 @@
                 onclick={() => onProcessingModeChange("cymatics")}
             >
                 Cymatics
+            </button>
+            <button
+                class="toggle-item scientific"
+                class:active={processingMode === "lpc-vowel-space"}
+                onclick={() => onProcessingModeChange("lpc-vowel-space")}
+                title="LPC formant extraction - scientific-grade (Bark scale)"
+            >
+                LPC
             </button>
         </div>
     </section>
@@ -344,25 +353,24 @@
     /* Toggle Group */
     .toggle-group {
         display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
         border-radius: var(--radius-md);
-        overflow: hidden;
         border: 1px solid var(--border);
     }
 
     .toggle-item {
         flex: 1;
-        padding: 0.5rem 0.25rem;
+        min-width: 3.5rem;
+        padding: 0.5rem 0.35rem;
         font-size: 0.7rem;
         font-weight: 500;
-        background: transparent;
-        border: none;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
         color: var(--muted-foreground);
         cursor: pointer;
         transition: all 0.15s ease;
-    }
-
-    .toggle-item:not(:last-child) {
-        border-right: 1px solid var(--border);
     }
 
     .toggle-item:hover {
@@ -378,6 +386,11 @@
     .toggle-item.featured.active {
         background: var(--amber);
         color: var(--amber-foreground);
+    }
+
+    .toggle-item.scientific.active {
+        background: oklch(0.65 0.18 250); /* Scientific blue */
+        color: white;
     }
 
     /* Formant bars visualization */

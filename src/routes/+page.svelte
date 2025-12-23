@@ -255,6 +255,74 @@
     return () => resonanceWorker?.terminate();
   });
 
+  // ═══════════════════════════════════════════
+  // LPC WORKER (Scientific-grade formant extraction)
+  // ═══════════════════════════════════════════
+  let lpcWorker: Worker | null = null;
+  let pendingLpcFileId: string | null = null;
+  let pendingLpcSlot: "primary" | "secondary" = "primary";
+
+  $effect(() => {
+    if (browser && !lpcWorker) {
+      lpcWorker = new Worker(new URL("$lib/lpcWorker.ts", import.meta.url), {
+        type: "module",
+      });
+
+      lpcWorker.onmessage = (e) => {
+        if (e.data.type === "result" && pendingLpcFileId) {
+          const file = fileMap.get(pendingLpcFileId);
+          if (file) {
+            file.lpcVowelSpacePoints = e.data.points;
+            file.lpcFormantTrajectory = e.data.formantTrajectory;
+            file.isProcessing = false;
+
+            // Update display if this is the active file
+            const slot = pendingLpcSlot;
+            const fileId = slot === "primary" ? primaryFileId : secondaryFileId;
+            if (fileId === pendingLpcFileId) {
+              if (slot === "primary") {
+                primaryPoints = e.data.points.map(
+                  (p: { x: number; y: number; z: number; t: number }) => ({
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    t: p.t,
+                  }),
+                );
+                // LPC formants are in lpcFormantTrajectory, use last frame for display
+                if (e.data.formantTrajectory?.length > 0) {
+                  const last =
+                    e.data.formantTrajectory[
+                      e.data.formantTrajectory.length - 1
+                    ];
+                  primaryFormants = [last.f1, last.f2, last.f3];
+                }
+              } else {
+                secondaryPoints = e.data.points.map(
+                  (p: { x: number; y: number; z: number; t: number }) => ({
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    t: p.t,
+                  }),
+                );
+                if (e.data.formantTrajectory?.length > 0) {
+                  const last =
+                    e.data.formantTrajectory[
+                      e.data.formantTrajectory.length - 1
+                    ];
+                  secondaryFormants = [last.f1, last.f2, last.f3];
+                }
+              }
+            }
+          }
+          pendingLpcFileId = null;
+        }
+      };
+    }
+    return () => lpcWorker?.terminate();
+  });
+
   // Helper: get active points based on processing mode
   function getActivePoints(file: AudioFileEntry): PhaseSpacePoint[] {
     switch (file.config.processingMode) {
@@ -266,6 +334,14 @@
         return file.cymaticsPoints;
       case "lissajous-manifold":
         return file.lissajousManifoldPoints;
+      case "lpc-vowel-space":
+        // LPC points have opacity, map to PhaseSpacePoint format
+        return file.lpcVowelSpacePoints.map((p) => ({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          t: p.t,
+        }));
       default:
         return file.signalDynamicsPoints;
     }
@@ -285,6 +361,13 @@
         return file.cymaticsPoints;
       case "lissajous-manifold":
         return file.lissajousManifoldPoints;
+      case "lpc-vowel-space":
+        return file.lpcVowelSpacePoints.map((p) => ({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          t: p.t,
+        }));
       default:
         return file.signalDynamicsPoints;
     }
@@ -308,6 +391,7 @@
         lissajousPoints: [],
         cymaticsPoints: [],
         lissajousManifoldPoints: [],
+        lpcVowelSpacePoints: [],
         computedTau: 12,
         isProcessing: true,
       };
@@ -424,8 +508,21 @@
           pcaAlign: file.config.pcaAlign,
           maxPoints: 5000,
         });
+      } else if (mode === "lpc-vowel-space") {
+        // Use LPC worker (scientific-grade formant extraction)
+        if (!lpcWorker) return;
+        pendingLpcFileId = file.id;
+        pendingLpcSlot = slot;
+
+        lpcWorker.postMessage({
+          type: "compute",
+          samples: file.buffer.getChannelData(0),
+          sampleRate: file.buffer.sampleRate,
+          windowMs: file.config.windowMs,
+          maxPoints: 5000,
+        });
       } else {
-        // Use resonance worker (lissajous or cymatics)
+        // Use resonance worker (lissajous, cymatics, lissajous-manifold)
         if (!resonanceWorker) return;
         pendingResonanceFileId = file.id;
         pendingResonanceSlot = slot;
@@ -614,6 +711,18 @@
         normalize: file.config.normalize,
         preprocess: file.config.preprocess,
         pcaAlign: file.config.pcaAlign,
+        maxPoints: 5000,
+      });
+    } else if (mode === "lpc-vowel-space") {
+      if (!lpcWorker) return;
+      pendingLpcFileId = file.id;
+      pendingLpcSlot = "primary";
+
+      lpcWorker.postMessage({
+        type: "compute",
+        samples: file.buffer.getChannelData(0),
+        sampleRate: file.buffer.sampleRate,
+        windowMs: file.config.windowMs,
         maxPoints: 5000,
       });
     } else {
@@ -1338,6 +1447,19 @@
                     >
                       Cymatics
                     </button>
+                    <button
+                      class="mode-btn scientific"
+                      class:active={selectedOverlayConfig.processingMode ===
+                        "lpc-vowel-space"}
+                      onclick={() =>
+                        setOverlayProcessingMode(
+                          selectedOverlayConfig.fileId,
+                          "lpc-vowel-space",
+                        )}
+                      title="LPC (Scientific)"
+                    >
+                      LPC
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1454,6 +1576,10 @@
   .mode-btn.featured.active {
     background: var(--amber, #f59e0b);
     color: var(--amber-foreground, #1c1917);
+  }
+  .mode-btn.scientific.active {
+    background: oklch(0.65 0.18 250); /* Scientific blue */
+    color: white;
   }
 
   /* Single View */
