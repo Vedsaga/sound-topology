@@ -198,7 +198,8 @@
   let resonanceWorker: Worker | null = null;
   let pendingResonanceFileId: string | null = null;
   let pendingResonanceSlot: "primary" | "secondary" = "primary";
-  let pendingResonanceMode: "lissajous" | "cymatics" = "lissajous";
+  let pendingResonanceMode: "lissajous" | "cymatics" | "lissajous-manifold" =
+    "lissajous-manifold";
 
   $effect(() => {
     if (browser && !resonanceWorker) {
@@ -214,6 +215,8 @@
             // Store in appropriate cache
             if (pendingResonanceMode === "lissajous") {
               file.lissajousPoints = e.data.points;
+            } else if (pendingResonanceMode === "lissajous-manifold") {
+              file.lissajousManifoldPoints = e.data.points;
             } else {
               file.cymaticsPoints = e.data.points;
             }
@@ -261,6 +264,8 @@
         return file.lissajousPoints;
       case "cymatics":
         return file.cymaticsPoints;
+      case "lissajous-manifold":
+        return file.lissajousManifoldPoints;
       default:
         return file.signalDynamicsPoints;
     }
@@ -278,6 +283,8 @@
         return file.lissajousPoints;
       case "cymatics":
         return file.cymaticsPoints;
+      case "lissajous-manifold":
+        return file.lissajousManifoldPoints;
       default:
         return file.signalDynamicsPoints;
     }
@@ -300,6 +307,7 @@
         signalDynamicsPoints: [],
         lissajousPoints: [],
         cymaticsPoints: [],
+        lissajousManifoldPoints: [],
         computedTau: 12,
         isProcessing: true,
       };
@@ -1260,6 +1268,19 @@
                       Lissajous
                     </button>
                     <button
+                      class="mode-btn featured"
+                      class:active={selectedOverlayConfig.processingMode ===
+                        "lissajous-manifold"}
+                      onclick={() =>
+                        setOverlayProcessingMode(
+                          selectedOverlayConfig.fileId,
+                          "lissajous-manifold",
+                        )}
+                      title="Manifold (Topology)"
+                    >
+                      Manifold
+                    </button>
+                    <button
                       class="mode-btn"
                       class:active={selectedOverlayConfig.processingMode ===
                         "cymatics"}
@@ -1384,6 +1405,10 @@
   .mode-btn.active {
     background: var(--color-brand);
     color: white;
+  }
+  .mode-btn.featured.active {
+    background: var(--amber, #f59e0b);
+    color: var(--amber-foreground, #1c1917);
   }
 
   /* Single View */

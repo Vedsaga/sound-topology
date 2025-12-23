@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ProcessingMode } from "$lib/audioLibraryTypes";
+    import * as Collapsible from "$lib/components/ui/collapsible";
 
     // Props
     let {
@@ -13,7 +14,7 @@
         pcaAlign = true,
         xrayMode = true,
         opacity = 0.15,
-        processingMode = "signal-dynamics" as ProcessingMode,
+        processingMode = "lissajous-manifold" as ProcessingMode,
         windowMs = 25,
         formantFrequencies = null as [number, number, number] | null,
         onTauChange,
@@ -59,207 +60,131 @@
     } = $props();
 
     let isSpectralMode = $derived(
-        processingMode === "lissajous" || processingMode === "cymatics",
+        processingMode === "lissajous" ||
+            processingMode === "cymatics" ||
+            processingMode === "lissajous-manifold",
     );
+
+    let advancedOpen = $state(false);
 </script>
 
-<div class="control-panel glass">
-    <!-- Processing Method Section -->
-    <div class="section">
-        <h3 class="panel-title">Processing Method</h3>
-        <div class="mode-buttons">
+<div class="control-panel">
+    <!-- Processing Mode Selector -->
+    <section class="section">
+        <h3 class="section-title">Mode</h3>
+        <div class="toggle-group">
             <button
-                class="mode-btn"
+                class="toggle-item"
                 class:active={processingMode === "signal-dynamics"}
                 onclick={() => onProcessingModeChange("signal-dynamics")}
             >
-                Signal Dynamics
+                Signal
             </button>
             <button
-                class="mode-btn"
+                class="toggle-item"
                 class:active={processingMode === "lissajous"}
                 onclick={() => onProcessingModeChange("lissajous")}
             >
                 Lissajous
             </button>
             <button
-                class="mode-btn"
+                class="toggle-item featured"
+                class:active={processingMode === "lissajous-manifold"}
+                onclick={() => onProcessingModeChange("lissajous-manifold")}
+                title="Time-stacked topology - reveals vowel identity"
+            >
+                Manifold
+            </button>
+            <button
+                class="toggle-item"
                 class:active={processingMode === "cymatics"}
                 onclick={() => onProcessingModeChange("cymatics")}
             >
                 Cymatics
             </button>
         </div>
+    </section>
 
-        {#if isSpectralMode}
-            <div class="control-group">
-                <div class="control-header">
-                    <label for="window-slider">Window</label>
-                    <span class="control-value">{windowMs}ms</span>
+    <!-- Formant Display (for spectral modes) -->
+    {#if isSpectralMode && formantFrequencies}
+        <section class="section formant-section">
+            <div class="formant-bars">
+                <div
+                    class="formant-bar"
+                    style="--height: {Math.min(
+                        (formantFrequencies[0] / 800) * 100,
+                        100,
+                    )}%"
+                >
+                    <span class="formant-label">F1</span>
+                    <span class="formant-value"
+                        >{formantFrequencies[0].toFixed(0)}</span
+                    >
                 </div>
-                <input
-                    id="window-slider"
-                    type="range"
-                    class="slider"
-                    min="15"
-                    max="50"
-                    step="5"
-                    value={windowMs}
-                    oninput={(e) =>
-                        onWindowMsChange(
-                            parseInt((e.target as HTMLInputElement).value),
-                        )}
-                />
+                <div
+                    class="formant-bar"
+                    style="--height: {Math.min(
+                        (formantFrequencies[1] / 2500) * 100,
+                        100,
+                    )}%"
+                >
+                    <span class="formant-label">F2</span>
+                    <span class="formant-value"
+                        >{formantFrequencies[1].toFixed(0)}</span
+                    >
+                </div>
+                <div
+                    class="formant-bar"
+                    style="--height: {Math.min(
+                        (formantFrequencies[2] / 3500) * 100,
+                        100,
+                    )}%"
+                >
+                    <span class="formant-label">F3</span>
+                    <span class="formant-value"
+                        >{formantFrequencies[2].toFixed(0)}</span
+                    >
+                </div>
             </div>
+        </section>
+    {/if}
 
-            {#if formantFrequencies}
-                <div class="formant-display">
-                    <span class="formant"
-                        >F1: {formantFrequencies[0].toFixed(0)}Hz</span
-                    >
-                    <span class="formant"
-                        >F2: {formantFrequencies[1].toFixed(0)}Hz</span
-                    >
-                    <span class="formant"
-                        >F3: {formantFrequencies[2].toFixed(0)}Hz</span
-                    >
-                </div>
-            {/if}
-        {/if}
-    </div>
-
-    <!-- Signal Processing Section (for signal-dynamics mode) -->
-    {#if processingMode === "signal-dynamics"}
-        <div class="section">
-            <h3 class="panel-title">Signal Processing</h3>
-
-            <label class="checkbox-label">
-                <input
-                    type="checkbox"
-                    checked={preprocess}
-                    onchange={(e) =>
-                        onPreprocessChange(
-                            (e.target as HTMLInputElement).checked,
-                        )}
-                />
-                <span>Band-pass Filter</span>
-                <span class="hint-inline">(60Hz-4kHz)</span>
-            </label>
-
-            <label class="checkbox-label">
-                <input
-                    type="checkbox"
-                    checked={pcaAlign}
-                    onchange={(e) =>
-                        onPcaAlignChange(
-                            (e.target as HTMLInputElement).checked,
-                        )}
-                />
-                <span>PCA Align</span>
-                <span class="hint-inline">(standard view)</span>
-            </label>
-        </div>
-
-        <!-- Embedding Section (for signal-dynamics mode) -->
-        <div class="section">
-            <h3 class="panel-title">Embedding</h3>
-
-            <label class="checkbox-label">
-                <input
-                    type="checkbox"
-                    checked={autoTau}
-                    onchange={(e) =>
-                        onAutoTauChange((e.target as HTMLInputElement).checked)}
-                />
-                <span>Auto τ</span>
-                {#if autoTau}
-                    <span class="computed-value">= {computedTau}</span>
-                {/if}
-            </label>
-
-            {#if !autoTau}
-                <div class="control-group">
-                    <div class="control-header">
-                        <label for="tau-slider">τ (Delay)</label>
-                        <span class="control-value">{tau}</span>
-                    </div>
+    <!-- Display Settings -->
+    <section class="section">
+        <div class="display-row">
+            <div class="switch-row">
+                <span class="switch-label">X-ray</span>
+                <button
+                    class="switch-toggle"
+                    class:on={xrayMode}
+                    onclick={() => onXrayModeChange(!xrayMode)}
+                    role="switch"
+                    aria-checked={xrayMode}
+                >
+                    <span class="switch-thumb"></span>
+                </button>
+            </div>
+            {#if xrayMode}
+                <div class="opacity-control">
                     <input
-                        id="tau-slider"
                         type="range"
-                        class="slider"
-                        min="1"
-                        max="50"
-                        step="1"
-                        value={tau}
+                        class="opacity-slider"
+                        min="0.02"
+                        max="0.3"
+                        step="0.01"
+                        value={opacity}
                         oninput={(e) =>
-                            onTauChange(
-                                parseInt((e.target as HTMLInputElement).value),
+                            onOpacityChange(
+                                parseFloat(
+                                    (e.target as HTMLInputElement).value,
+                                ),
                             )}
                     />
                 </div>
             {/if}
-
-            <div class="control-group">
-                <div class="control-header">
-                    <label for="smoothing-slider">Smoothing</label>
-                    <span class="control-value">{smoothing}</span>
-                </div>
-                <input
-                    id="smoothing-slider"
-                    type="range"
-                    class="slider"
-                    min="0"
-                    max="20"
-                    step="1"
-                    value={smoothing}
-                    oninput={(e) =>
-                        onSmoothingChange(
-                            parseInt((e.target as HTMLInputElement).value),
-                        )}
-                />
-                <p class="control-hint">Laplacian iterations</p>
-            </div>
         </div>
-    {/if}
 
-    <!-- Display Section -->
-    <div class="section">
-        <h3 class="panel-title">Display</h3>
-
-        <label class="checkbox-label">
-            <input
-                type="checkbox"
-                checked={xrayMode}
-                onchange={(e) =>
-                    onXrayModeChange((e.target as HTMLInputElement).checked)}
-            />
-            <span>X-ray Mode</span>
-            <span class="hint-inline">(reveal density)</span>
-        </label>
-
-        {#if xrayMode}
-            <div class="control-group">
-                <div class="control-header">
-                    <label for="opacity-slider">Opacity</label>
-                    <span class="control-value">{opacity.toFixed(2)}</span>
-                </div>
-                <input
-                    id="opacity-slider"
-                    type="range"
-                    class="slider"
-                    min="0.02"
-                    max="0.5"
-                    step="0.01"
-                    value={opacity}
-                    oninput={(e) =>
-                        onOpacityChange(
-                            parseFloat((e.target as HTMLInputElement).value),
-                        )}
-                />
-            </div>
-        {/if}
-
-        <div class="control-row">
+        <div class="checkboxes-row">
             <label class="checkbox-label">
                 <input
                     type="checkbox"
@@ -269,9 +194,8 @@
                             (e.target as HTMLInputElement).checked,
                         )}
                 />
-                <span>Normalize</span>
+                Normalize
             </label>
-
             <label class="checkbox-label">
                 <input
                     type="checkbox"
@@ -281,192 +205,390 @@
                             (e.target as HTMLInputElement).checked,
                         )}
                 />
-                <span>Show Path</span>
+                Path
             </label>
         </div>
-    </div>
+    </section>
 
-    {#if pointCount > 0}
-        <div class="stats">
-            <div class="stat">
-                <span class="stat-label">Points</span>
-                <span class="stat-value">{pointCount.toLocaleString()}</span>
-            </div>
-            <div class="stat">
-                <span class="stat-label">Duration</span>
-                <span class="stat-value">{duration.toFixed(2)}s</span>
-            </div>
-        </div>
-    {/if}
+    <!-- Stats Badges -->
+    <section class="section stats-section">
+        <span class="stat-badge">{pointCount.toLocaleString()} pts</span>
+        <span class="stat-badge">{duration.toFixed(2)}s</span>
+    </section>
+
+    <!-- Advanced Settings (Collapsible) -->
+    <Collapsible.Root bind:open={advancedOpen}>
+        <Collapsible.Trigger class="advanced-trigger">
+            <span>Advanced</span>
+            <span class="trigger-icon" class:open={advancedOpen}>▾</span>
+        </Collapsible.Trigger>
+        <Collapsible.Content class="advanced-content">
+            {#if isSpectralMode}
+                <!-- Window slider for spectral modes -->
+                <div class="control-row">
+                    <span class="control-label">Window</span>
+                    <input
+                        type="range"
+                        min="15"
+                        max="50"
+                        step="5"
+                        value={windowMs}
+                        oninput={(e) =>
+                            onWindowMsChange(
+                                parseInt((e.target as HTMLInputElement).value),
+                            )}
+                    />
+                    <span class="control-value">{windowMs}ms</span>
+                </div>
+            {:else}
+                <!-- Signal processing options -->
+                <label class="checkbox-label full">
+                    <input
+                        type="checkbox"
+                        checked={preprocess}
+                        onchange={(e) =>
+                            onPreprocessChange(
+                                (e.target as HTMLInputElement).checked,
+                            )}
+                    />
+                    Band-pass filter
+                </label>
+                <label class="checkbox-label full">
+                    <input
+                        type="checkbox"
+                        checked={autoTau}
+                        onchange={(e) =>
+                            onAutoTauChange(
+                                (e.target as HTMLInputElement).checked,
+                            )}
+                    />
+                    Auto-τ
+                </label>
+                {#if !autoTau}
+                    <div class="control-row">
+                        <span class="control-label">τ</span>
+                        <input
+                            type="range"
+                            min="1"
+                            max="100"
+                            value={tau}
+                            oninput={(e) =>
+                                onTauChange(
+                                    parseInt(
+                                        (e.target as HTMLInputElement).value,
+                                    ),
+                                )}
+                        />
+                        <span class="control-value">{tau}</span>
+                    </div>
+                {:else}
+                    <div class="computed-tau">Computed τ: {computedTau}</div>
+                {/if}
+                <label class="checkbox-label full">
+                    <input
+                        type="checkbox"
+                        checked={pcaAlign}
+                        onchange={(e) =>
+                            onPcaAlignChange(
+                                (e.target as HTMLInputElement).checked,
+                            )}
+                    />
+                    PCA align
+                </label>
+                <div class="control-row">
+                    <span class="control-label">Smooth</span>
+                    <input
+                        type="range"
+                        min="1"
+                        max="15"
+                        value={smoothing}
+                        oninput={(e) =>
+                            onSmoothingChange(
+                                parseInt((e.target as HTMLInputElement).value),
+                            )}
+                    />
+                    <span class="control-value">{smoothing}</span>
+                </div>
+            {/if}
+        </Collapsible.Content>
+    </Collapsible.Root>
 </div>
 
 <style>
     .control-panel {
-        padding: 1.25rem;
-        border-radius: var(--radius-lg);
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
+        padding: 1rem;
+        background: var(--card);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border);
+        font-size: 0.875rem;
     }
 
     .section {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--color-border);
     }
 
-    .section:last-of-type {
-        border-bottom: none;
-        padding-bottom: 0;
-    }
-
-    .panel-title {
-        font-size: 0.6875rem;
+    .section-title {
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--color-muted-foreground);
+        letter-spacing: 0.05em;
+        color: var(--muted-foreground);
         margin: 0;
     }
 
-    .control-group {
+    /* Toggle Group */
+    .toggle-group {
+        display: flex;
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
+
+    .toggle-item {
+        flex: 1;
+        padding: 0.5rem 0.25rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+        background: transparent;
+        border: none;
+        color: var(--muted-foreground);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .toggle-item:not(:last-child) {
+        border-right: 1px solid var(--border);
+    }
+
+    .toggle-item:hover {
+        background: var(--accent);
+        color: var(--accent-foreground);
+    }
+
+    .toggle-item.active {
+        background: var(--primary);
+        color: var(--primary-foreground);
+    }
+
+    .toggle-item.featured.active {
+        background: var(--amber);
+        color: var(--amber-foreground);
+    }
+
+    /* Formant bars visualization */
+    .formant-section {
+        padding: 0.5rem 0;
+    }
+
+    .formant-bars {
+        display: flex;
+        gap: 0.75rem;
+        height: 3rem;
+        align-items: flex-end;
+    }
+
+    .formant-bar {
+        flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 0.375rem;
+        align-items: center;
+        gap: 0.25rem;
     }
 
-    .control-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
+    .formant-bar::before {
+        content: "";
+        width: 100%;
+        height: var(--height);
+        background: linear-gradient(
+            to top,
+            var(--amber),
+            oklch(0.828 0.189 84.429 / 0.5)
+        );
+        border-radius: 2px;
+        min-height: 4px;
     }
 
-    .control-header label {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-foreground);
-    }
-
-    .control-value {
-        font-size: 0.875rem;
+    .formant-label {
+        font-size: 0.625rem;
         font-weight: 600;
-        color: var(--color-brand);
-        font-variant-numeric: tabular-nums;
+        color: var(--muted-foreground);
     }
 
-    .control-hint {
+    .formant-value {
         font-size: 0.75rem;
-        color: var(--color-muted-foreground);
-        margin: 0;
+        font-variant-numeric: tabular-nums;
+        color: var(--foreground);
     }
 
-    .control-row {
+    /* Display settings */
+    .display-row {
         display: flex;
-        gap: 1.5rem;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .switch-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .switch-label {
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+    }
+
+    .switch-toggle {
+        width: 2.25rem;
+        height: 1.25rem;
+        padding: 2px;
+        border-radius: 999px;
+        border: none;
+        background: var(--input);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .switch-toggle.on {
+        background: var(--primary);
+    }
+
+    .switch-thumb {
+        display: block;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 999px;
+        background: var(--background);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        transition: transform 0.15s;
+    }
+
+    .switch-toggle.on .switch-thumb {
+        transform: translateX(1rem);
+    }
+
+    .opacity-control {
+        flex: 1;
+    }
+
+    .opacity-slider {
+        width: 100%;
+        height: 4px;
+        accent-color: var(--primary);
+    }
+
+    .checkboxes-row {
+        display: flex;
+        gap: 1rem;
     }
 
     .checkbox-label {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-        color: var(--color-foreground);
-        cursor: pointer;
-    }
-
-    .checkbox-label input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-        accent-color: var(--color-brand);
-        cursor: pointer;
-    }
-
-    .hint-inline {
+        gap: 0.375rem;
         font-size: 0.75rem;
-        color: var(--color-muted-foreground);
-        margin-left: auto;
+        color: var(--muted-foreground);
+        cursor: pointer;
     }
 
-    .computed-value {
-        font-size: 0.8125rem;
-        font-weight: 600;
-        color: var(--color-accent-amber);
-        margin-left: auto;
+    .checkbox-label.full {
+        width: 100%;
+    }
+
+    .checkbox-label input {
+        accent-color: var(--primary);
+    }
+
+    /* Stats badges */
+    .stats-section {
+        flex-direction: row;
+        gap: 0.5rem;
+    }
+
+    .stat-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 500;
         font-variant-numeric: tabular-nums;
+        background: var(--secondary);
+        color: var(--secondary-foreground);
+        border-radius: 999px;
     }
 
-    .stats {
+    /* Advanced collapsible */
+    :global(.advanced-trigger) {
         display: flex;
-        gap: 1.5rem;
-        padding-top: 0.75rem;
-        border-top: 1px solid var(--color-border);
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        padding: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--muted-foreground);
+        background: transparent;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition:
+            color 0.15s,
+            border-color 0.15s;
     }
 
-    .stat {
+    :global(.advanced-trigger:hover) {
+        color: var(--foreground);
+        border-color: var(--muted-foreground);
+    }
+
+    .trigger-icon {
+        transition: transform 0.2s;
+    }
+
+    .trigger-icon.open {
+        transform: rotate(180deg);
+    }
+
+    :global(.advanced-content) {
         display: flex;
         flex-direction: column;
-        gap: 0.125rem;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
     }
 
-    .stat-label {
-        font-size: 0.6875rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-muted-foreground);
+    .control-row {
+        display: grid;
+        grid-template-columns: 3.5rem 1fr 2.5rem;
+        align-items: center;
+        gap: 0.5rem;
     }
 
-    .stat-value {
-        font-size: 0.9375rem;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-        color: var(--color-foreground);
-    }
-
-    /* Processing mode buttons */
-    .mode-buttons {
-        display: flex;
-        gap: 0.25rem;
-        background: var(--color-muted);
-        padding: 0.25rem;
-        border-radius: var(--radius-md);
-    }
-
-    .mode-btn {
-        flex: 1;
-        padding: 0.375rem 0.5rem;
+    .control-label {
         font-size: 0.75rem;
-        font-weight: 500;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-sm);
-        color: var(--color-muted-foreground);
-        cursor: pointer;
-        transition: all 0.15s ease;
+        color: var(--muted-foreground);
     }
 
-    .mode-btn:hover {
-        color: var(--color-foreground);
+    .control-row input[type="range"] {
+        width: 100%;
+        height: 4px;
+        accent-color: var(--primary);
     }
 
-    .mode-btn.active {
-        background: var(--color-background);
-        color: var(--color-foreground);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-    }
-
-    /* Formant display */
-    .formant-display {
-        display: flex;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-    }
-
-    .formant {
+    .control-value {
         font-size: 0.75rem;
         font-variant-numeric: tabular-nums;
-        color: var(--color-accent-amber);
-        font-weight: 500;
+        color: var(--foreground);
+        text-align: right;
+    }
+
+    .computed-tau {
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+        padding: 0.25rem 0;
     }
 </style>

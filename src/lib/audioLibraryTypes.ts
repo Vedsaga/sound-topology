@@ -20,10 +20,11 @@ export interface FileMetadata {
 /**
  * Processing methodology for geometry rendering
  * - signal-dynamics: Takens' phase space embedding (signal dynamics)
- * - lissajous: Formant-ratio based 3D curves (spectral geometry)
+ * - lissajous: Averaged formant-ratio 3D curves (spectral geometry)
  * - cymatics: Formant-weighted Chladni patterns (spectral geometry)
+ * - lissajous-manifold: Time-stacked formant segments → thickened tube (resonance topology)
  */
-export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics';
+export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics' | 'lissajous-manifold';
 
 /**
  * Time-extended formant trajectory frame
@@ -63,8 +64,9 @@ export interface AudioFileEntry {
     config: AnalysisConfig;
     // Cached computation results per processing mode
     signalDynamicsPoints: PhaseSpacePoint[];  // Takens embedding
-    lissajousPoints: PhaseSpacePoint[];       // Formant-ratio curves
+    lissajousPoints: PhaseSpacePoint[];       // Averaged formant-ratio curves
     cymaticsPoints: PhaseSpacePoint[];        // Chladni patterns
+    lissajousManifoldPoints: PhaseSpacePoint[];  // Time-stacked resonance regions
     formantTrajectory?: FormantFrame[];       // Time-extended formants
     computedTau: number;
     // Status
@@ -150,7 +152,7 @@ export function getDefaultConfig(): AnalysisConfig {
         pcaAlign: true,
         xrayMode: true,
         opacity: 0.12,
-        processingMode: 'lissajous',
+        processingMode: 'lissajous-manifold',
         windowMs: 25
     };
 }

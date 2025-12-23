@@ -17,7 +17,7 @@ interface ResWorkerMessage {
     type: 'compute';
     samples: Float32Array;
     sampleRate: number;
-    mode: 'lissajous' | 'cymatics';
+    mode: 'lissajous' | 'cymatics' | 'lissajous-manifold';
     windowMs: number;
     maxPoints: number;
 }
@@ -291,13 +291,97 @@ function generateCymatics(formantTrajectory: ResFormantFrame[], maxPoints: numbe
 }
 
 // ============================================
+// LISSAJOUS MANIFOLD GEOMETRY (Topology Mode)
+// ============================================
+
+/**
+ * Golden ratio and sqrt(2) for phase jitter - irrational to prevent locking
+ */
+const PHI = 1.618033988749895;  // Golden ratio
+const SQRT2 = 1.4142135623730951;
+
+/**
+ * Generate time-stacked Lissajous manifold using instantaneous formant ratios
+ * 
+ * Key differences from averaged Lissajous:
+ * - Per-frame curve segments (not one global curve)
+ * - Phase jitter prevents artificial coherence
+ * - Stability weighting emphasizes sustained vowels
+ * - Results in "thickened tube" where topology is visible
+ */
+function generateLissajousManifold(
+    formantTrajectory: ResFormantFrame[],
+    maxPoints: number
+): ResPoint3D[] {
+    if (formantTrajectory.length < 2) return [];
+
+    const points: ResPoint3D[] = [];
+    const pointsPerFrame = 20;  // Short segment per frame
+    const cycles = 1.5;         // Cycles per segment (less = more cloud-like)
+
+    // Track previous formants for stability calculation
+    let prevF1 = formantTrajectory[0].formants[0];
+    let prevF2 = formantTrajectory[0].formants[1];
+    let prevF3 = formantTrajectory[0].formants[2];
+
+    for (let frameIdx = 0; frameIdx < formantTrajectory.length; frameIdx++) {
+        const frame = formantTrajectory[frameIdx];
+        const [f1, f2, f3] = frame.formants;
+
+        // Calculate stability: inverse of formant change
+        // Stable vowels → higher weight → denser contribution
+        const deltaF = Math.abs(f1 - prevF1) + Math.abs(f2 - prevF2) + Math.abs(f3 - prevF3);
+        const stability = 1 / (deltaF + 1e-3);  // Avoid division by zero
+        const weight = Math.min(stability * 0.05, 1);  // Clamp to [0, 1]
+
+        // Skip very unstable frames (transitions between sounds)
+        if (weight < 0.1) {
+            prevF1 = f1; prevF2 = f2; prevF3 = f3;
+            continue;
+        }
+
+        // Instantaneous ratios (NOT averaged)
+        const r12 = f1 / f2;
+        const r23 = f2 / f3;
+        const r13 = f1 / f3;
+
+        // Phase jitter using irrational numbers - prevents filament locking
+        const phi1 = (frameIdx * PHI) % (2 * Math.PI);
+        const phi2 = (frameIdx * SQRT2) % (2 * Math.PI);
+
+        // Generate short Lissajous segment for this frame
+        for (let i = 0; i < pointsPerFrame; i++) {
+            const localT = (i / pointsPerFrame) * cycles * 2 * Math.PI;
+
+            points.push({
+                x: weight * Math.sin(r13 * localT + phi1),
+                y: weight * Math.sin(r23 * localT + phi2),
+                z: weight * Math.sin(r12 * localT),
+                t: frameIdx / formantTrajectory.length  // Global time for color
+            });
+        }
+
+        // Update previous formants
+        prevF1 = f1; prevF2 = f2; prevF3 = f3;
+    }
+
+    // Downsample if too many points
+    if (points.length > maxPoints) {
+        const step = Math.ceil(points.length / maxPoints);
+        return points.filter((_, i) => i % step === 0);
+    }
+
+    return points;
+}
+
+// ============================================
 // MAIN PROCESSING PIPELINE
 // ============================================
 
 function processAudio(
     samples: Float32Array,
     sampleRate: number,
-    mode: 'lissajous' | 'cymatics',
+    mode: 'lissajous' | 'cymatics' | 'lissajous-manifold',
     windowMs: number,
     maxPoints: number
 ): ResWorkerResult {
@@ -331,6 +415,8 @@ function processAudio(
     let points: ResPoint3D[];
     if (mode === 'lissajous') {
         points = generateLissajous(formantTrajectory, maxPoints);
+    } else if (mode === 'lissajous-manifold') {
+        points = generateLissajousManifold(formantTrajectory, maxPoints);
     } else {
         points = generateCymatics(formantTrajectory, maxPoints);
     }
