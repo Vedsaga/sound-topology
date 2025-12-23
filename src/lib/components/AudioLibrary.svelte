@@ -33,8 +33,8 @@
     let isLoading = $state(false);
     let filter = $state<FilterState>({
         letters: [],
-        gender: "all",
-        speakerNums: [],
+        genders: [],
+        speakerIds: [],
     });
 
     // Derived

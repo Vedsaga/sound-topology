@@ -8,7 +8,12 @@
   import OverlayScene from "$lib/components/OverlayScene.svelte";
   import { Maximize2, Grid3x3, GitCompare, Layers } from "@lucide/svelte";
   import type { PhaseSpacePoint } from "$lib/phaseSpaceEmbedding";
-  import type { AudioFileEntry, AnalysisConfig } from "$lib/audioLibraryTypes";
+  import type {
+    AudioFileEntry,
+    AnalysisConfig,
+    ProcessingMode,
+    FormantFrame,
+  } from "$lib/audioLibraryTypes";
   import {
     parseFilename,
     generateFileId,
@@ -28,6 +33,7 @@
     visible: boolean;
     xrayMode: boolean;
     opacity: number;
+    processingMode: ProcessingMode;
     // Per-cloud 3D transforms
     position: [number, number, number];
     rotation: [number, number, number]; // Euler angles in degrees
@@ -66,12 +72,14 @@
   let primaryConfig = $state<AnalysisConfig>(getDefaultConfig());
   let primaryComputedTau = $state(12);
   let primaryDuration = $state(0);
+  let primaryFormants = $state<[number, number, number] | null>(null);
 
   // Secondary display state
   let secondaryPoints = $state<PhaseSpacePoint[]>([]);
   let secondaryConfig = $state<AnalysisConfig>(getDefaultConfig());
   let secondaryComputedTau = $state(12);
   let secondaryDuration = $state(0);
+  let secondaryFormants = $state<[number, number, number] | null>(null);
 
   // Derived file names for display
   let primaryFileName = $derived(
@@ -162,7 +170,7 @@
         if (e.data.type === "result" && pendingFileId) {
           const file = fileMap.get(pendingFileId);
           if (file) {
-            file.points = e.data.points;
+            file.signalDynamicsPoints = e.data.points;
             file.computedTau = e.data.computedTau;
             file.isProcessing = false;
 
@@ -185,6 +193,97 @@
   });
 
   // ═══════════════════════════════════════════
+  // RESONANCE WORKER
+  // ═══════════════════════════════════════════
+  let resonanceWorker: Worker | null = null;
+  let pendingResonanceFileId: string | null = null;
+  let pendingResonanceSlot: "primary" | "secondary" = "primary";
+  let pendingResonanceMode: "lissajous" | "cymatics" = "lissajous";
+
+  $effect(() => {
+    if (browser && !resonanceWorker) {
+      resonanceWorker = new Worker(
+        new URL("$lib/resonanceWorker.ts", import.meta.url),
+        { type: "module" },
+      );
+
+      resonanceWorker.onmessage = (e) => {
+        if (e.data.type === "result" && pendingResonanceFileId) {
+          const file = fileMap.get(pendingResonanceFileId);
+          if (file) {
+            // Store in appropriate cache
+            if (pendingResonanceMode === "lissajous") {
+              file.lissajousPoints = e.data.points;
+            } else {
+              file.cymaticsPoints = e.data.points;
+            }
+            file.formantTrajectory = e.data.formantTrajectory;
+            file.isProcessing = false;
+
+            // Update display if this is the active file
+            const slot = pendingResonanceSlot;
+            const fileId = slot === "primary" ? primaryFileId : secondaryFileId;
+            if (fileId === pendingResonanceFileId) {
+              if (slot === "primary") {
+                primaryPoints = e.data.points;
+                if (e.data.formantTrajectory?.length > 0) {
+                  const last =
+                    e.data.formantTrajectory[
+                      e.data.formantTrajectory.length - 1
+                    ];
+                  primaryFormants = last.formants;
+                }
+              } else {
+                secondaryPoints = e.data.points;
+                if (e.data.formantTrajectory?.length > 0) {
+                  const last =
+                    e.data.formantTrajectory[
+                      e.data.formantTrajectory.length - 1
+                    ];
+                  secondaryFormants = last.formants;
+                }
+              }
+            }
+          }
+          pendingResonanceFileId = null;
+        }
+      };
+    }
+    return () => resonanceWorker?.terminate();
+  });
+
+  // Helper: get active points based on processing mode
+  function getActivePoints(file: AudioFileEntry): PhaseSpacePoint[] {
+    switch (file.config.processingMode) {
+      case "signal-dynamics":
+        return file.signalDynamicsPoints;
+      case "lissajous":
+        return file.lissajousPoints;
+      case "cymatics":
+        return file.cymaticsPoints;
+      default:
+        return file.signalDynamicsPoints;
+    }
+  }
+
+  // Helper: get points for a specific mode (for overlay per-file mode)
+  function getPointsForMode(
+    file: AudioFileEntry,
+    mode: ProcessingMode,
+  ): PhaseSpacePoint[] {
+    switch (mode) {
+      case "signal-dynamics":
+        return file.signalDynamicsPoints;
+      case "lissajous":
+        return file.lissajousPoints;
+      case "cymatics":
+        return file.cymaticsPoints;
+      default:
+        return file.signalDynamicsPoints;
+    }
+  }
+
+  // ═══════════════════════════════════════════
   // FILE MANAGEMENT
   // ═══════════════════════════════════════════
   function handleFilesAdded(newFiles: { file: File; buffer: AudioBuffer }[]) {
@@ -198,7 +297,9 @@
         buffer,
         metadata: parseFilename(file.name),
         config: getDefaultConfig(),
-        points: [],
+        signalDynamicsPoints: [],
+        lissajousPoints: [],
+        cymaticsPoints: [],
         computedTau: 12,
         isProcessing: true,
       };
@@ -221,32 +322,47 @@
     if (slot === "primary" && primaryFileId === id) {
       primaryFileId = null;
       primaryPoints = [];
+      primaryFormants = null;
       return;
     }
     if (slot === "secondary" && secondaryFileId === id) {
       secondaryFileId = null;
       secondaryPoints = [];
+      secondaryFormants = null;
       return;
     }
 
     if (slot === "primary") {
       primaryFileId = id;
-      primaryPoints = file.points;
+      primaryPoints = getActivePoints(file);
       primaryConfig = { ...file.config };
       primaryComputedTau = file.computedTau;
       primaryDuration = file.buffer.duration;
+      // Set formants if available
+      if (file.formantTrajectory?.length) {
+        const last = file.formantTrajectory[file.formantTrajectory.length - 1];
+        primaryFormants = last.formants;
+      } else {
+        primaryFormants = null;
+      }
 
-      if (file.points.length === 0) {
+      if (getActivePoints(file).length === 0) {
         triggerComputation(file, "primary");
       }
     } else {
       secondaryFileId = id;
-      secondaryPoints = file.points;
+      secondaryPoints = getActivePoints(file);
       secondaryConfig = { ...file.config };
       secondaryComputedTau = file.computedTau;
       secondaryDuration = file.buffer.duration;
+      if (file.formantTrajectory?.length) {
+        const last = file.formantTrajectory[file.formantTrajectory.length - 1];
+        secondaryFormants = last.formants;
+      } else {
+        secondaryFormants = null;
+      }
 
-      if (file.points.length === 0) {
+      if (getActivePoints(file).length === 0) {
         triggerComputation(file, "secondary");
       }
     }
@@ -276,26 +392,46 @@
     file: AudioFileEntry,
     slot: "primary" | "secondary",
   ) {
-    if (!worker) return;
-
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      pendingFileId = file.id;
-      pendingSlot = slot;
       file.isProcessing = true;
 
-      worker!.postMessage({
-        type: "compute",
-        samples: file.buffer.getChannelData(0),
-        sampleRate: file.buffer.sampleRate,
-        tau: file.config.tau,
-        autoTau: file.config.autoTau,
-        smoothing: file.config.smoothing,
-        normalize: file.config.normalize,
-        preprocess: file.config.preprocess,
-        pcaAlign: file.config.pcaAlign,
-        maxPoints: 5000,
-      });
+      const mode = file.config.processingMode;
+
+      if (mode === "signal-dynamics") {
+        // Use phase space worker
+        if (!worker) return;
+        pendingFileId = file.id;
+        pendingSlot = slot;
+
+        worker.postMessage({
+          type: "compute",
+          samples: file.buffer.getChannelData(0),
+          sampleRate: file.buffer.sampleRate,
+          tau: file.config.tau,
+          autoTau: file.config.autoTau,
+          smoothing: file.config.smoothing,
+          normalize: file.config.normalize,
+          preprocess: file.config.preprocess,
+          pcaAlign: file.config.pcaAlign,
+          maxPoints: 5000,
+        });
+      } else {
+        // Use resonance worker (lissajous or cymatics)
+        if (!resonanceWorker) return;
+        pendingResonanceFileId = file.id;
+        pendingResonanceSlot = slot;
+        pendingResonanceMode = mode as "lissajous" | "cymatics";
+
+        resonanceWorker.postMessage({
+          type: "compute",
+          samples: file.buffer.getChannelData(0),
+          sampleRate: file.buffer.sampleRate,
+          mode: mode,
+          windowMs: file.config.windowMs,
+          maxPoints: 5000,
+        });
+      }
     }, 100);
   }
 
@@ -355,7 +491,7 @@
           ? {
               id: c.fileId,
               label: file.metadata.rawName,
-              points: file.points,
+              points: getPointsForMode(file, c.processingMode),
               color: c.color,
               xrayMode: c.xrayMode,
               opacity: c.opacity,
@@ -372,10 +508,15 @@
 
   function addToOverlay(fileId: string) {
     if (overlayConfigs.some((c) => c.fileId === fileId)) {
-      // Already in overlay, select it instead
-      selectedOverlayId = fileId;
+      // Already in overlay - toggle selection
+      if (selectedOverlayId === fileId) {
+        selectedOverlayId = null; // Unselect
+      } else {
+        selectedOverlayId = fileId; // Select
+      }
       return;
     }
+    const file = fileMap.get(fileId);
     const colorIndex = overlayConfigs.length % OVERLAY_COLORS.length;
     overlayConfigs = [
       ...overlayConfigs,
@@ -385,6 +526,7 @@
         visible: true,
         xrayMode: globalXray,
         opacity: 0.15,
+        processingMode: file?.config.processingMode ?? "lissajous",
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         scale: 1,
@@ -394,9 +536,8 @@
     // Auto-select newly added file
     selectedOverlayId = fileId;
 
-    // Ensure file is computed
-    const file = fileMap.get(fileId);
-    if (file && file.points.length === 0) {
+    // Ensure file is computed for the default mode
+    if (file && getActivePoints(file).length === 0) {
       triggerComputation(file, "primary");
     }
   }
@@ -425,6 +566,21 @@
     overlayConfigs = overlayConfigs.map((c) =>
       c.fileId === fileId ? { ...c, opacity } : c,
     );
+  }
+
+  function setOverlayProcessingMode(fileId: string, mode: ProcessingMode) {
+    overlayConfigs = overlayConfigs.map((c) =>
+      c.fileId === fileId ? { ...c, processingMode: mode } : c,
+    );
+    // Ensure the file has computed points for this mode
+    const file = fileMap.get(fileId);
+    if (file && getPointsForMode(file, mode).length === 0) {
+      // Temporarily set file's config to compute for this mode
+      const originalMode = file.config.processingMode;
+      file.config.processingMode = mode;
+      triggerComputation(file, "primary");
+      file.config.processingMode = originalMode; // Restore
+    }
   }
 
   function toggleGlobalXray() {
@@ -518,6 +674,9 @@
                 pcaAlign={primaryConfig.pcaAlign}
                 xrayMode={primaryConfig.xrayMode}
                 opacity={primaryConfig.opacity}
+                processingMode={primaryConfig.processingMode}
+                windowMs={primaryConfig.windowMs}
+                formantFrequencies={primaryFormants}
                 onTauChange={(v) => updateConfig("primary", "tau", v)}
                 onSmoothingChange={(v) =>
                   updateConfig("primary", "smoothing", v)}
@@ -530,6 +689,9 @@
                 onPcaAlignChange={(v) => updateConfig("primary", "pcaAlign", v)}
                 onXrayModeChange={(v) => updateConfig("primary", "xrayMode", v)}
                 onOpacityChange={(v) => updateConfig("primary", "opacity", v)}
+                onProcessingModeChange={(v) =>
+                  updateConfig("primary", "processingMode", v)}
+                onWindowMsChange={(v) => updateConfig("primary", "windowMs", v)}
                 pointCount={primaryPoints.length}
                 duration={primaryDuration}
               />
@@ -558,10 +720,10 @@
                     tabindex="0"
                   >
                     <div class="thumbnail-preview">
-                      {#if browser && file.points.length > 0}
+                      {#if browser && getActivePoints(file).length > 0}
                         <Canvas>
                           <PhaseSpaceScene
-                            points={file.points}
+                            points={getActivePoints(file)}
                             showPath={true}
                             xrayMode={true}
                             opacity={0.15}
@@ -714,6 +876,9 @@
                   pcaAlign={primaryConfig.pcaAlign}
                   xrayMode={primaryConfig.xrayMode}
                   opacity={primaryConfig.opacity}
+                  processingMode={primaryConfig.processingMode}
+                  windowMs={primaryConfig.windowMs}
+                  formantFrequencies={primaryFormants}
                   onTauChange={(v) => updateConfig("primary", "tau", v)}
                   onSmoothingChange={(v) =>
                     updateConfig("primary", "smoothing", v)}
@@ -728,6 +893,10 @@
                   onXrayModeChange={(v) =>
                     updateConfig("primary", "xrayMode", v)}
                   onOpacityChange={(v) => updateConfig("primary", "opacity", v)}
+                  onProcessingModeChange={(v) =>
+                    updateConfig("primary", "processingMode", v)}
+                  onWindowMsChange={(v) =>
+                    updateConfig("primary", "windowMs", v)}
                   pointCount={primaryPoints.length}
                   duration={primaryDuration}
                 />
@@ -765,6 +934,9 @@
                   pcaAlign={secondaryConfig.pcaAlign}
                   xrayMode={secondaryConfig.xrayMode}
                   opacity={secondaryConfig.opacity}
+                  processingMode={secondaryConfig.processingMode}
+                  windowMs={secondaryConfig.windowMs}
+                  formantFrequencies={secondaryFormants}
                   onTauChange={(v) => updateConfig("secondary", "tau", v)}
                   onSmoothingChange={(v) =>
                     updateConfig("secondary", "smoothing", v)}
@@ -781,6 +953,10 @@
                     updateConfig("secondary", "xrayMode", v)}
                   onOpacityChange={(v) =>
                     updateConfig("secondary", "opacity", v)}
+                  onProcessingModeChange={(v) =>
+                    updateConfig("secondary", "processingMode", v)}
+                  onWindowMsChange={(v) =>
+                    updateConfig("secondary", "windowMs", v)}
                   pointCount={secondaryPoints.length}
                   duration={secondaryDuration}
                 />
@@ -1050,6 +1226,52 @@
                       />
                       X-ray Mode
                     </label>
+                  </div>
+                </div>
+
+                <!-- Processing Mode for focused file -->
+                <div class="editing-group">
+                  <span class="group-label">Processing</span>
+                  <div class="mode-toggle-row">
+                    <button
+                      class="mode-btn"
+                      class:active={selectedOverlayConfig.processingMode ===
+                        "signal-dynamics"}
+                      onclick={() =>
+                        setOverlayProcessingMode(
+                          selectedOverlayConfig.fileId,
+                          "signal-dynamics",
+                        )}
+                      title="Signal Dynamics (Takens)"
+                    >
+                      Signal
+                    </button>
+                    <button
+                      class="mode-btn"
+                      class:active={selectedOverlayConfig.processingMode ===
+                        "lissajous"}
+                      onclick={() =>
+                        setOverlayProcessingMode(
+                          selectedOverlayConfig.fileId,
+                          "lissajous",
+                        )}
+                      title="Lissajous (Formant Ratios)"
+                    >
+                      Lissajous
+                    </button>
+                    <button
+                      class="mode-btn"
+                      class:active={selectedOverlayConfig.processingMode ===
+                        "cymatics"}
+                      onclick={() =>
+                        setOverlayProcessingMode(
+                          selectedOverlayConfig.fileId,
+                          "cymatics",
+                        )}
+                      title="Cymatics (Chladni)"
+                    >
+                      Cymatics
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1743,5 +1965,34 @@
   .editing-placeholder p {
     font-size: 0.75rem;
     color: var(--color-muted-foreground);
+  }
+
+  .mode-toggle-row {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .mode-btn {
+    flex: 1;
+    padding: 0.375rem 0.25rem;
+    font-size: 0.625rem;
+    font-weight: 500;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .mode-btn:hover {
+    border-color: var(--color-foreground);
+    color: var(--color-foreground);
+  }
+
+  .mode-btn.active {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: var(--color-brand-foreground);
   }
 </style>

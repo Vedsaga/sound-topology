@@ -1,4 +1,6 @@
 <script lang="ts">
+    import type { ProcessingMode } from "$lib/audioLibraryTypes";
+
     // Props
     let {
         tau = 12,
@@ -11,6 +13,9 @@
         pcaAlign = true,
         xrayMode = true,
         opacity = 0.15,
+        processingMode = "signal-dynamics" as ProcessingMode,
+        windowMs = 25,
+        formantFrequencies = null as [number, number, number] | null,
         onTauChange,
         onSmoothingChange,
         onNormalizeChange,
@@ -20,6 +25,8 @@
         onPcaAlignChange,
         onXrayModeChange,
         onOpacityChange,
+        onProcessingModeChange,
+        onWindowMsChange,
         pointCount = 0,
         duration = 0,
     }: {
@@ -33,6 +40,9 @@
         pcaAlign: boolean;
         xrayMode: boolean;
         opacity: number;
+        processingMode: ProcessingMode;
+        windowMs: number;
+        formantFrequencies: [number, number, number] | null;
         onTauChange: (value: number) => void;
         onSmoothingChange: (value: number) => void;
         onNormalizeChange: (value: boolean) => void;
@@ -42,99 +52,175 @@
         onPcaAlignChange: (value: boolean) => void;
         onXrayModeChange: (value: boolean) => void;
         onOpacityChange: (value: number) => void;
+        onProcessingModeChange: (value: ProcessingMode) => void;
+        onWindowMsChange: (value: number) => void;
         pointCount?: number;
         duration?: number;
     } = $props();
+
+    let isSpectralMode = $derived(
+        processingMode === "lissajous" || processingMode === "cymatics",
+    );
 </script>
 
 <div class="control-panel glass">
-    <!-- Preprocessing Section -->
+    <!-- Processing Method Section -->
     <div class="section">
-        <h3 class="panel-title">Signal Processing</h3>
+        <h3 class="panel-title">Processing Method</h3>
+        <div class="mode-buttons">
+            <button
+                class="mode-btn"
+                class:active={processingMode === "signal-dynamics"}
+                onclick={() => onProcessingModeChange("signal-dynamics")}
+            >
+                Signal Dynamics
+            </button>
+            <button
+                class="mode-btn"
+                class:active={processingMode === "lissajous"}
+                onclick={() => onProcessingModeChange("lissajous")}
+            >
+                Lissajous
+            </button>
+            <button
+                class="mode-btn"
+                class:active={processingMode === "cymatics"}
+                onclick={() => onProcessingModeChange("cymatics")}
+            >
+                Cymatics
+            </button>
+        </div>
 
-        <label class="checkbox-label">
-            <input
-                type="checkbox"
-                checked={preprocess}
-                onchange={(e) =>
-                    onPreprocessChange((e.target as HTMLInputElement).checked)}
-            />
-            <span>Band-pass Filter</span>
-            <span class="hint-inline">(60Hz-4kHz)</span>
-        </label>
-
-        <label class="checkbox-label">
-            <input
-                type="checkbox"
-                checked={pcaAlign}
-                onchange={(e) =>
-                    onPcaAlignChange((e.target as HTMLInputElement).checked)}
-            />
-            <span>PCA Align</span>
-            <span class="hint-inline">(standard view)</span>
-        </label>
-    </div>
-
-    <!-- Embedding Section -->
-    <div class="section">
-        <h3 class="panel-title">Embedding</h3>
-
-        <label class="checkbox-label">
-            <input
-                type="checkbox"
-                checked={autoTau}
-                onchange={(e) =>
-                    onAutoTauChange((e.target as HTMLInputElement).checked)}
-            />
-            <span>Auto τ</span>
-            {#if autoTau}
-                <span class="computed-value">= {computedTau}</span>
-            {/if}
-        </label>
-
-        {#if !autoTau}
+        {#if isSpectralMode}
             <div class="control-group">
                 <div class="control-header">
-                    <label for="tau-slider">τ (Delay)</label>
-                    <span class="control-value">{tau}</span>
+                    <label for="window-slider">Window</label>
+                    <span class="control-value">{windowMs}ms</span>
                 </div>
                 <input
-                    id="tau-slider"
+                    id="window-slider"
                     type="range"
                     class="slider"
-                    min="1"
+                    min="15"
                     max="50"
-                    step="1"
-                    value={tau}
+                    step="5"
+                    value={windowMs}
                     oninput={(e) =>
-                        onTauChange(
+                        onWindowMsChange(
                             parseInt((e.target as HTMLInputElement).value),
                         )}
                 />
             </div>
-        {/if}
 
-        <div class="control-group">
-            <div class="control-header">
-                <label for="smoothing-slider">Smoothing</label>
-                <span class="control-value">{smoothing}</span>
-            </div>
-            <input
-                id="smoothing-slider"
-                type="range"
-                class="slider"
-                min="0"
-                max="20"
-                step="1"
-                value={smoothing}
-                oninput={(e) =>
-                    onSmoothingChange(
-                        parseInt((e.target as HTMLInputElement).value),
-                    )}
-            />
-            <p class="control-hint">Laplacian iterations</p>
-        </div>
+            {#if formantFrequencies}
+                <div class="formant-display">
+                    <span class="formant"
+                        >F1: {formantFrequencies[0].toFixed(0)}Hz</span
+                    >
+                    <span class="formant"
+                        >F2: {formantFrequencies[1].toFixed(0)}Hz</span
+                    >
+                    <span class="formant"
+                        >F3: {formantFrequencies[2].toFixed(0)}Hz</span
+                    >
+                </div>
+            {/if}
+        {/if}
     </div>
+
+    <!-- Signal Processing Section (for signal-dynamics mode) -->
+    {#if processingMode === "signal-dynamics"}
+        <div class="section">
+            <h3 class="panel-title">Signal Processing</h3>
+
+            <label class="checkbox-label">
+                <input
+                    type="checkbox"
+                    checked={preprocess}
+                    onchange={(e) =>
+                        onPreprocessChange(
+                            (e.target as HTMLInputElement).checked,
+                        )}
+                />
+                <span>Band-pass Filter</span>
+                <span class="hint-inline">(60Hz-4kHz)</span>
+            </label>
+
+            <label class="checkbox-label">
+                <input
+                    type="checkbox"
+                    checked={pcaAlign}
+                    onchange={(e) =>
+                        onPcaAlignChange(
+                            (e.target as HTMLInputElement).checked,
+                        )}
+                />
+                <span>PCA Align</span>
+                <span class="hint-inline">(standard view)</span>
+            </label>
+        </div>
+
+        <!-- Embedding Section (for signal-dynamics mode) -->
+        <div class="section">
+            <h3 class="panel-title">Embedding</h3>
+
+            <label class="checkbox-label">
+                <input
+                    type="checkbox"
+                    checked={autoTau}
+                    onchange={(e) =>
+                        onAutoTauChange((e.target as HTMLInputElement).checked)}
+                />
+                <span>Auto τ</span>
+                {#if autoTau}
+                    <span class="computed-value">= {computedTau}</span>
+                {/if}
+            </label>
+
+            {#if !autoTau}
+                <div class="control-group">
+                    <div class="control-header">
+                        <label for="tau-slider">τ (Delay)</label>
+                        <span class="control-value">{tau}</span>
+                    </div>
+                    <input
+                        id="tau-slider"
+                        type="range"
+                        class="slider"
+                        min="1"
+                        max="50"
+                        step="1"
+                        value={tau}
+                        oninput={(e) =>
+                            onTauChange(
+                                parseInt((e.target as HTMLInputElement).value),
+                            )}
+                    />
+                </div>
+            {/if}
+
+            <div class="control-group">
+                <div class="control-header">
+                    <label for="smoothing-slider">Smoothing</label>
+                    <span class="control-value">{smoothing}</span>
+                </div>
+                <input
+                    id="smoothing-slider"
+                    type="range"
+                    class="slider"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value={smoothing}
+                    oninput={(e) =>
+                        onSmoothingChange(
+                            parseInt((e.target as HTMLInputElement).value),
+                        )}
+                />
+                <p class="control-hint">Laplacian iterations</p>
+            </div>
+        </div>
+    {/if}
 
     <!-- Display Section -->
     <div class="section">
@@ -336,5 +422,51 @@
         font-weight: 600;
         font-variant-numeric: tabular-nums;
         color: var(--color-foreground);
+    }
+
+    /* Processing mode buttons */
+    .mode-buttons {
+        display: flex;
+        gap: 0.25rem;
+        background: var(--color-muted);
+        padding: 0.25rem;
+        border-radius: var(--radius-md);
+    }
+
+    .mode-btn {
+        flex: 1;
+        padding: 0.375rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--color-muted-foreground);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .mode-btn:hover {
+        color: var(--color-foreground);
+    }
+
+    .mode-btn.active {
+        background: var(--color-background);
+        color: var(--color-foreground);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Formant display */
+    .formant-display {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .formant {
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-accent-amber);
+        font-weight: 500;
     }
 </style>

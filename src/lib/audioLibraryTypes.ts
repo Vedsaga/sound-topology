@@ -18,6 +18,23 @@ export interface FileMetadata {
 }
 
 /**
+ * Processing methodology for geometry rendering
+ * - signal-dynamics: Takens' phase space embedding (signal dynamics)
+ * - lissajous: Formant-ratio based 3D curves (spectral geometry)
+ * - cymatics: Formant-weighted Chladni patterns (spectral geometry)
+ */
+export type ProcessingMode = 'signal-dynamics' | 'lissajous' | 'cymatics';
+
+/**
+ * Time-extended formant trajectory frame
+ * Captures resonance structure over time for topological analysis
+ */
+export interface FormantFrame {
+    time: number;              // Time in seconds
+    formants: [number, number, number];  // F1, F2, F3 in Hz
+}
+
+/**
  * Per-file analysis configuration
  */
 export interface AnalysisConfig {
@@ -27,8 +44,12 @@ export interface AnalysisConfig {
     preprocess: boolean;
     autoTau: boolean;
     pcaAlign: boolean;
+    // Canvas rendering - independent of processing mode
     xrayMode: boolean;
     opacity: number;
+    // Processing methodology
+    processingMode: ProcessingMode;
+    windowMs: number;         // 20-40ms for resonance extraction
 }
 
 /**
@@ -40,8 +61,11 @@ export interface AudioFileEntry {
     buffer: AudioBuffer;
     metadata: FileMetadata;
     config: AnalysisConfig;
-    // Cached computation results
-    points: PhaseSpacePoint[];
+    // Cached computation results per processing mode
+    signalDynamicsPoints: PhaseSpacePoint[];  // Takens embedding
+    lissajousPoints: PhaseSpacePoint[];       // Formant-ratio curves
+    cymaticsPoints: PhaseSpacePoint[];        // Chladni patterns
+    formantTrajectory?: FormantFrame[];       // Time-extended formants
     computedTau: number;
     // Status
     isProcessing: boolean;
@@ -125,7 +149,9 @@ export function getDefaultConfig(): AnalysisConfig {
         autoTau: true,
         pcaAlign: true,
         xrayMode: true,
-        opacity: 0.12
+        opacity: 0.12,
+        processingMode: 'lissajous',
+        windowMs: 25
     };
 }
 
