@@ -55,11 +55,12 @@ interface LPCWorkerResult {
 // CONSTANTS
 // ============================================
 
-const TARGET_SAMPLE_RATE = 10000;  // Downsample target
-const LPC_ORDER = 14;              // p = 10 + 4
-const PRE_EMPHASIS_ALPHA = 0.97;
-const LAGUERRE_MAX_ITER = 50;
-const LAGUERRE_EPSILON = 1e-10;
+// Don't downsample - work at native rate for better accuracy
+const TARGET_SAMPLE_RATE = 16000;  // Moderate downsample (not too aggressive)
+const LPC_ORDER = 12;              // Standard for speech (2 + num_formants * 2)
+const PRE_EMPHASIS_ALPHA = 0.95;   // Slightly less aggressive
+const LAGUERRE_MAX_ITER = 80;
+const LAGUERRE_EPSILON = 1e-12;
 
 // ============================================
 // COMPLEX NUMBER UTILITIES
@@ -111,38 +112,51 @@ function complexScale(c: Complex, s: number): Complex {
 // ============================================
 
 /**
- * Downsample audio to target rate using simple decimation with anti-alias filter
+ * Downsample audio using a proper sinc-based low-pass filter
  */
 function downsample(samples: Float32Array, fromRate: number, toRate: number): Float32Array {
     if (fromRate <= toRate) return samples;
 
-    const ratio = Math.round(fromRate / toRate);
-    const cutoff = toRate / 2;
+    const ratio = fromRate / toRate;
 
-    // Simple low-pass filter before decimation (moving average approximation)
-    const filterSize = Math.max(3, ratio * 2);
-    const filtered = new Float32Array(samples.length);
+    // Design a simple FIR low-pass filter
+    const filterLength = 31;  // Odd number for symmetric filter
+    const halfLen = Math.floor(filterLength / 2);
+    const cutoff = 0.9 / ratio;  // Slightly below Nyquist to avoid aliasing
 
-    for (let i = 0; i < samples.length; i++) {
-        let sum = 0;
-        let count = 0;
-        for (let j = -filterSize; j <= filterSize; j++) {
-            const idx = i + j;
-            if (idx >= 0 && idx < samples.length) {
-                // Simple triangular window
-                const weight = 1 - Math.abs(j) / (filterSize + 1);
-                sum += samples[idx] * weight;
-                count += weight;
-            }
+    // Create windowed sinc filter
+    const filter = new Float32Array(filterLength);
+    let filterSum = 0;
+    for (let i = 0; i < filterLength; i++) {
+        const n = i - halfLen;
+        if (n === 0) {
+            filter[i] = 2 * Math.PI * cutoff;
+        } else {
+            filter[i] = Math.sin(2 * Math.PI * cutoff * n) / n;
         }
-        filtered[i] = sum / count;
+        // Hamming window
+        filter[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (filterLength - 1));
+        filterSum += filter[i];
+    }
+    // Normalize
+    for (let i = 0; i < filterLength; i++) {
+        filter[i] /= filterSum;
     }
 
-    // Decimate
-    const newLength = Math.ceil(samples.length / ratio);
+    // Apply filter and decimate
+    const newLength = Math.floor(samples.length / ratio);
     const result = new Float32Array(newLength);
+
     for (let i = 0; i < newLength; i++) {
-        result[i] = filtered[i * ratio];
+        const srcIdx = Math.floor(i * ratio);
+        let sum = 0;
+        for (let j = 0; j < filterLength; j++) {
+            const idx = srcIdx + j - halfLen;
+            if (idx >= 0 && idx < samples.length) {
+                sum += samples[idx] * filter[j];
+            }
+        }
+        result[i] = sum;
     }
 
     return result;
@@ -373,33 +387,73 @@ function deflatePolynomialArray(coeffs: number[], realRoot: number): number[] {
 
 /**
  * Convert polynomial roots to formant frequencies and bandwidths
+ * Relaxed constraints to handle more vowel types
  */
 function rootsToFormants(roots: Complex[], sampleRate: number): {
     frequencies: number[];
     bandwidths: number[]
 } {
-    const formants: { freq: number; bw: number }[] = [];
+    const candidates: { freq: number; bw: number; magnitude: number }[] = [];
 
     for (const root of roots) {
         const magnitude = complexAbs(root);
 
-        // Only consider roots inside unit circle with positive imaginary part
-        if (magnitude < 0.99 && magnitude > 0.5 && root.im > 0.01) {
+        // Accept roots inside unit circle with positive imaginary part
+        // Very relaxed constraints to maximize candidate detection
+        if (magnitude < 0.998 && magnitude > 0.2 && root.im > 0.0001) {
             const angle = Math.atan2(root.im, root.re);
             const freq = Math.abs(angle) * sampleRate / (2 * Math.PI);
             const bandwidth = -Math.log(magnitude) * sampleRate / Math.PI;
 
-            // Filter to speech formant range (200-4000 Hz)
-            if (freq >= 200 && freq <= 4000 && bandwidth > 20 && bandwidth < 500) {
-                formants.push({ freq, bw: bandwidth });
+            // Wide frequency range: 100Hz to 5000Hz
+            if (freq >= 100 && freq <= 5000 && bandwidth > 5 && bandwidth < 1000) {
+                candidates.push({ freq, bw: bandwidth, magnitude });
             }
         }
     }
 
     // Sort by frequency
-    formants.sort((a, b) => a.freq - b.freq);
+    candidates.sort((a, b) => a.freq - b.freq);
 
-    // Take first 3 as F1, F2, F3
+    // Select formants
+    const formants: { freq: number; bw: number }[] = [];
+
+    // F1: lowest frequency candidate 150-1000Hz
+    const f1Candidates = candidates.filter(c => c.freq >= 150 && c.freq <= 1000);
+    if (f1Candidates.length > 0) {
+        // Pick lowest frequency with reasonable bandwidth
+        f1Candidates.sort((a, b) => a.freq - b.freq);
+        formants.push(f1Candidates[0]);
+    }
+
+    // F2: next candidate above F1, range 500-3000Hz
+    // Only require 100Hz gap for back vowels where F1 and F2 are close
+    const f1Freq = formants[0]?.freq ?? 0;
+    const f2Candidates = candidates.filter(c =>
+        c.freq >= Math.max(500, f1Freq + 100) &&  // Reduced from 300 to 100
+        c.freq <= 3000 &&
+        c.freq !== f1Freq
+    );
+    if (f2Candidates.length > 0) {
+        // Pick strongest magnitude for F2
+        f2Candidates.sort((a, b) => b.magnitude - a.magnitude);
+        formants.push(f2Candidates[0]);
+    }
+
+    // F3: next candidate above F2, range 1800-5000Hz
+    const f2Freq = formants[1]?.freq ?? 0;
+    const f3Candidates = candidates.filter(c =>
+        c.freq >= Math.max(1800, f2Freq + 200) &&
+        c.freq <= 5000 &&
+        c.freq !== f1Freq &&
+        c.freq !== f2Freq
+    );
+    if (f3Candidates.length > 0) {
+        f3Candidates.sort((a, b) => b.magnitude - a.magnitude);
+        formants.push(f3Candidates[0]);
+    }
+
+    // Fill in defaults if needed
     const frequencies = [
         formants[0]?.freq ?? 500,
         formants[1]?.freq ?? 1500,

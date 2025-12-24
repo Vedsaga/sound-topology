@@ -98,8 +98,8 @@ function bitReverse(x: number, bits: number): number {
 // ============================================
 
 /**
- * Extract spectral envelope using cepstral smoothing
- * This removes pitch harmonics, keeping only resonance structure
+ * Extract spectral envelope using cepstral liftering
+ * This properly removes pitch harmonics, keeping only resonance structure
  */
 function extractSpectralEnvelope(magnitude: Float32Array, sampleRate: number): Float32Array {
     const n = magnitude.length;
@@ -110,26 +110,39 @@ function extractSpectralEnvelope(magnitude: Float32Array, sampleRate: number): F
         logMag[i] = Math.log(Math.max(magnitude[i], 1e-10));
     }
 
-    // 2. Compute cepstrum via IFFT approximation (simplified)
-    // Real cepstrum would use IFFT, here we use moving average as approximation
-    // for spectral envelope (smoother, faster)
-    const smoothed = new Float32Array(n);
-    const windowSize = Math.max(5, Math.floor(n / 30)); // Adaptive window
-
-    for (let i = 0; i < n; i++) {
+    // 2. Compute real cepstrum via IDFT (simplified - use DCT-like approach)
+    // The cepstrum separates slowly-varying (formants) from rapidly-varying (harmonics)
+    const cepstrum = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
         let sum = 0;
-        let count = 0;
-        for (let j = -windowSize; j <= windowSize; j++) {
-            const idx = i + j;
-            if (idx >= 0 && idx < n) {
-                sum += logMag[idx];
-                count++;
-            }
+        for (let i = 0; i < n; i++) {
+            sum += logMag[i] * Math.cos(Math.PI * k * (2 * i + 1) / (2 * n));
         }
-        smoothed[i] = sum / count;
+        cepstrum[k] = sum / n;
     }
 
-    // 3. Convert back from log domain
+    // 3. Lifter: keep more quefrency components to preserve close formants
+    // Higher cutoff = more spectral detail preserved
+    // For 44100Hz, we want to preserve features down to ~200Hz spacing
+    // Quefrency = 1/frequency, so 200Hz spacing = 5ms = 220 samples at 44100Hz
+    const lifterCutoff = Math.floor(sampleRate / 200);  // ~5ms - preserves closer formants
+    const actualCutoff = Math.min(lifterCutoff, Math.floor(n / 3));
+
+    for (let k = actualCutoff; k < n; k++) {
+        cepstrum[k] = 0;
+    }
+
+    // 4. Reconstruct envelope via DCT
+    const smoothed = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        let sum = cepstrum[0];  // DC component
+        for (let k = 1; k < actualCutoff; k++) {
+            sum += 2 * cepstrum[k] * Math.cos(Math.PI * k * (2 * i + 1) / (2 * n));
+        }
+        smoothed[i] = sum;
+    }
+
+    // 5. Convert back from log domain
     const envelope = new Float32Array(n);
     for (let i = 0; i < n; i++) {
         envelope[i] = Math.exp(smoothed[i]);
@@ -144,42 +157,64 @@ function extractSpectralEnvelope(magnitude: Float32Array, sampleRate: number): F
 
 /**
  * Detect formant peaks from spectral envelope
- * Returns top 3 formants (F1, F2, F3)
+ * Uses magnitude-based selection with frequency constraints
+ * Handles both front vowels (F2 high) and back vowels (F1, F2 close together)
  */
 function detectFormants(envelope: Float32Array, sampleRate: number): [number, number, number] {
     const n = envelope.length;
     const freqPerBin = sampleRate / (2 * n);
 
-    // Find local maxima (peaks) with their prominence
-    const peaks: { freq: number; mag: number; prominence: number }[] = [];
+    // Find ALL local maxima (peaks) in the formant range
+    const peaks: { freq: number; mag: number }[] = [];
 
-    // Search in typical formant range: 200Hz - 4000Hz
-    const minBin = Math.floor(200 / freqPerBin);
+    // Search in formant range: 150Hz - 4000Hz  
+    const minBin = Math.floor(150 / freqPerBin);
     const maxBin = Math.min(n - 1, Math.floor(4000 / freqPerBin));
+    const neighborhoodSize = Math.max(2, Math.floor(40 / freqPerBin));  // ~40Hz
 
-    for (let i = minBin + 1; i < maxBin - 1; i++) {
-        if (envelope[i] > envelope[i - 1] && envelope[i] > envelope[i + 1]) {
-            // Calculate prominence: how much higher than the lower neighbor
-            const minNeighbor = Math.min(envelope[i - 1], envelope[i + 1]);
-            const prominence = envelope[i] - minNeighbor;
+    for (let i = minBin + neighborhoodSize; i < maxBin - neighborhoodSize; i++) {
+        // Check if this is a local maximum
+        let isMax = true;
+        for (let j = 1; j <= neighborhoodSize; j++) {
+            if (envelope[i] < envelope[i - j] || envelope[i] < envelope[i + j]) {
+                isMax = false;
+                break;
+            }
+        }
+
+        if (isMax && envelope[i] > 0.001) {
             peaks.push({
                 freq: i * freqPerBin,
-                mag: envelope[i],
-                prominence
+                mag: envelope[i]
             });
         }
     }
 
-    // Sort by prominence (relative peak height) to get most distinctive peaks
-    peaks.sort((a, b) => b.prominence - a.prominence);
+    // Sort by frequency
+    peaks.sort((a, b) => a.freq - b.freq);
 
-    // Get top 3 frequencies, then sort by frequency for F1 < F2 < F3
-    const topFreqs = peaks.slice(0, 3).map(p => p.freq).sort((a, b) => a - b);
+    // If fewer than 3 peaks, return defaults
+    if (peaks.length < 3) {
+        return [500, 1500, 2500];
+    }
 
-    // Ensure we have 3 formants (fill with estimates if missing)
-    const f1 = topFreqs[0] || 500;   // Typical F1
-    const f2 = topFreqs[1] || 1500;  // Typical F2
-    const f3 = topFreqs[2] || 2500;  // Typical F3
+    // F1: Strongest peak in 150-1000Hz range
+    const f1Candidates = peaks.filter(p => p.freq >= 150 && p.freq <= 1000);
+    f1Candidates.sort((a, b) => b.mag - a.mag);
+    const f1 = f1Candidates[0]?.freq ?? 500;
+
+    // F2: Strongest peak above F1, range 500-2800Hz
+    // Key fix: Only require 100Hz gap from F1 for back vowels
+    const f2MinFreq = f1 + 100;
+    const f2Candidates = peaks.filter(p => p.freq >= f2MinFreq && p.freq <= 2800);
+    f2Candidates.sort((a, b) => b.mag - a.mag);
+    const f2 = f2Candidates[0]?.freq ?? 1500;
+
+    // F3: Strongest peak above F2, range 1800-4000Hz
+    const f3MinFreq = Math.max(1800, f2 + 200);
+    const f3Candidates = peaks.filter(p => p.freq >= f3MinFreq && p.freq <= 4000);
+    f3Candidates.sort((a, b) => b.mag - a.mag);
+    const f3 = f3Candidates[0]?.freq ?? 2500;
 
     return [f1, f2, f3];
 }

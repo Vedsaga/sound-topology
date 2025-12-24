@@ -6,6 +6,7 @@
         HelpCircle,
         PanelLeftClose,
         PanelLeft,
+        FlaskConical,
     } from "@lucide/svelte";
 
     // Props
@@ -33,7 +34,8 @@
     }
 
     const navItems = [
-        { id: "phase-space", label: "Phase Space", icon: Atom },
+        { id: "phase-space", label: "Phase Space", icon: Atom, href: "/" },
+        { id: "validation", label: "Validation", icon: FlaskConical, href: "/validation" },
         { id: "waveform", label: "Waveform", icon: Waves, disabled: true },
     ];
 </script>
@@ -64,20 +66,34 @@
     <nav class="nav">
         {#each navItems as item}
             {@const Icon = item.icon}
-            <button
-                class="sidebar-item"
-                class:active={currentView === item.id}
-                disabled={item.disabled}
-                title={isCollapsed ? item.label : undefined}
-            >
-                <Icon size={20} />
-                {#if !isCollapsed}
-                    <span>{item.label}</span>
-                    {#if item.disabled}
-                        <span class="coming-soon">Soon</span>
+            {#if item.href && !item.disabled}
+                <a
+                    href={item.href}
+                    class="sidebar-item"
+                    class:active={currentView === item.id}
+                    title={isCollapsed ? item.label : undefined}
+                >
+                    <Icon size={20} />
+                    {#if !isCollapsed}
+                        <span>{item.label}</span>
                     {/if}
-                {/if}
-            </button>
+                </a>
+            {:else}
+                <button
+                    class="sidebar-item"
+                    class:active={currentView === item.id}
+                    disabled={item.disabled}
+                    title={isCollapsed ? item.label : undefined}
+                >
+                    <Icon size={20} />
+                    {#if !isCollapsed}
+                        <span>{item.label}</span>
+                        {#if item.disabled}
+                            <span class="coming-soon">Soon</span>
+                        {/if}
+                    {/if}
+                </button>
+            {/if}
         {/each}
     </nav>
 
@@ -180,6 +196,11 @@
         transition: all 0.15s ease;
         text-align: left;
         white-space: nowrap;
+        text-decoration: none;
+    }
+
+    a.sidebar-item {
+        cursor: pointer;
     }
 
     .sidebar.collapsed .sidebar-item {
